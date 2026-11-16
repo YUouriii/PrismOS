@@ -137,9 +137,9 @@ public sealed class GlassDock : IGroupTheme
                     case Kind.Strip:
                         var stripSave = g.Save();
                         g.TranslateTransform(box.X, box.Y);
-                        var inner = MusicStrip.Measure(g, track!.Value, input.Source, s);
                         float phase = Environment.TickCount64 / 1000f;
-                        MusicStrip.Paint(g, inner, track.Value, input.TrackArt, s, phase, input.Blur ? 150 : 216, input.TrackLevels);
+                        MusicStrip.Paint(g, strip!.Value.Metrics, track!.Value, input.TrackArt, s, phase,
+                                         input.Blur ? 150 : 216, input.TrackLevels, input.Accent);
                         g.Restore(stripSave);
                         break;
                     case Kind.Time:

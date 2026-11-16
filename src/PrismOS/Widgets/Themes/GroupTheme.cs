@@ -100,10 +100,11 @@ public static class GroupThemes
             Rectangle.Empty,
             g =>
             {
-                var inner = MusicStrip.Measure(g, track, source, scale);
                 float phase = Environment.TickCount64 / 1000f;
                 g.TranslateTransform(layout.Pad, layout.Pad);
-                MusicStrip.Paint(g, inner, track, art, scale, phase, 216, null);
+                // Painted from the layout's own metrics: measuring again here let the painted
+                // pill drift away from the size and button rects the panel was built with.
+                MusicStrip.Paint(g, layout.Metrics, track, art, scale, phase, 216, null);
             },
             layout.Buttons);
     }

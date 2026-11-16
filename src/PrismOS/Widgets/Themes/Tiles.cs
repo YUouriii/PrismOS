@@ -70,6 +70,7 @@ public sealed class Tiles : IGroupTheme
 
         Rectangle[]? buttons = null;
         float stripInnerX = 0f;
+        var stripMetrics = strip?.Metrics;
         if (strip is { } stripLayout)
         {
             var slot = cards.First(c => c.Kind == "music").Box;
@@ -96,9 +97,9 @@ public sealed class Tiles : IGroupTheme
                     case "music":
                         var musicSave = g.Save();
                         g.TranslateTransform(box.X + stripInnerX, box.Y);
-                        var innerStrip = MusicStrip.Measure(g, track!.Value, input.Source, stripScale);
                         float phase = Environment.TickCount64 / 1000f;
-                        MusicStrip.Paint(g, innerStrip, track.Value, input.TrackArt, stripScale, phase, input.Blur ? 150 : 216, input.TrackLevels);
+                        MusicStrip.Paint(g, stripMetrics!.Value, track!.Value, input.TrackArt, stripScale, phase,
+                                         input.Blur ? 150 : 216, input.TrackLevels, input.Accent);
                         g.Restore(musicSave);
                         break;
                     case "battery": PaintBattery(g, box, input, s, inner); break;

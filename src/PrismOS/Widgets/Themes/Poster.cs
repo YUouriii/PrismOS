@@ -164,10 +164,10 @@ public sealed class Poster : IGroupTheme
         void Paint(Graphics g)
         {
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-            var inner = MusicStrip.Measure(g, track, input.Source, s);
             float phase = Environment.TickCount64 / 1000f;
             g.TranslateTransform(strip.Pad, strip.Pad);
-            MusicStrip.Paint(g, inner, track, input.TrackArt, s, phase, input.Blur ? 150 : 216, input.TrackLevels);
+            MusicStrip.Paint(g, strip.Metrics, track, input.TrackArt, s, phase,
+                             input.Blur ? 150 : 216, input.TrackLevels, input.Accent);
         }
 
         return new GroupPanel("poster-record", new Rectangle(origin, size), Rectangle.Empty, Paint, buttons);

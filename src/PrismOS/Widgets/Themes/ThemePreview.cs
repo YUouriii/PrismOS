@@ -49,7 +49,7 @@ public static class ThemePreview
 
             switch (theme)
             {
-                case WidgetTheme.Classic: DrawClassic(g, config, battery); break;
+                case WidgetTheme.Classic: DrawClassic(g, accent, config, battery); break;
                 case WidgetTheme.Editorial: DrawEditorial(g, accent, config, battery); break;
                 case var group when WidgetsConfig.IsGroup(group): DrawGroup(g, GroupThemes.For(group), accent, config, battery); break;
                 // A theme with no preview fails EveryTheme_Renders rather than shipping a tile
@@ -74,7 +74,7 @@ public static class ThemePreview
         return MusicStrip.Measure(g, SampleTrack, SampleSource, scale).Size;
     }
 
-    private static void DrawClassic(Graphics g, AppConfig config, bool battery)
+    private static void DrawClassic(Graphics g, Color accent, AppConfig config, bool battery)
     {
         var clock = config.Clock;
         var halo = config.Info.Halo;
@@ -88,7 +88,7 @@ public static class ThemePreview
 
         var rm = StripMetrics(scale);
         Place(g, rm, Margin, Canvas.Height - Margin - rm.Height,
-              bg => { var m = MusicStrip.Measure(bg, SampleTrack, SampleSource, scale); MusicStrip.Paint(bg, m, SampleTrack, null, scale, 0.35f); }, shadow: 0f);
+              bg => { var m = MusicStrip.Measure(bg, SampleTrack, SampleSource, scale); MusicStrip.Paint(bg, m, SampleTrack, null, scale, 0.35f, accent: accent); }, shadow: 0f);
 
         if (!battery) return; // a laptop preview shows the halo; a desktop preview does not
         var hs = BatteryHaloRenderer.Measure(halo, SampleBattery, scale);
@@ -109,7 +109,7 @@ public static class ThemePreview
 
         var rm = StripMetrics(scale);
         Place(g, rm, Margin / 2, Canvas.Height - Margin / 2 - rm.Height,
-              bg => { var m = MusicStrip.Measure(bg, SampleTrack, SampleSource, scale); MusicStrip.Paint(bg, m, SampleTrack, null, scale, 0.35f); }, scale);
+              bg => { var m = MusicStrip.Measure(bg, SampleTrack, SampleSource, scale); MusicStrip.Paint(bg, m, SampleTrack, null, scale, 0.35f, accent: accent); }, scale);
 
         if (battery)
         {

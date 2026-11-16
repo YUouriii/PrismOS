@@ -76,11 +76,13 @@ public sealed class Orbit : IGroupTheme
             if (clock) PaintDial(g, new RectangleF(pad + (colWidth - dial) / 2f, pad, dial, dial), input, s);
             if (strip is { } sl && track is { } t)
             {
-                var inner = MusicStrip.Measure(g, t, input.Source, s);
                 float phase = Environment.TickCount64 / 1000f;
                 var save = g.Save();
                 g.TranslateTransform(stripX, stripY);
-                MusicStrip.Paint(g, inner, t, input.TrackArt, s, phase, input.Blur ? 150 : 216, input.TrackLevels);
+                // The layout's metrics, not a fresh measure: the panel was sized from them, and
+                // the buttons' hit rects came from them.
+                MusicStrip.Paint(g, sl.Metrics, t, input.TrackArt, s, phase,
+                                 input.Blur ? 150 : 216, input.TrackLevels, input.Accent);
                 g.Restore(save);
             }
             if (battery is not null) PaintBatteryRing(g, ring, input, s, caption, captionFont, tracking);

@@ -84,7 +84,7 @@ public sealed class Monolith : IGroupTheme
             }
 
             panels.Add(new GroupPanel("monolith-strip", new Rectangle(origin, size), Rectangle.Empty,
-                g => PaintMusicSet(g, set, track, battery, input, s, pad), buttons, cardRegions, NoShadow: true));
+                g => PaintMusicSet(g, set, track, battery, input, s, pad, strip?.Metrics), buttons, cardRegions, NoShadow: true));
         }
         return panels;
     }
@@ -180,7 +180,7 @@ public sealed class Monolith : IGroupTheme
     }
 
     private static void PaintMusicSet(Graphics g, SetLayout set, NowPlayingReading? track, BatteryReading? battery,
-                                      GroupInput input, float s, int pad)
+                                      GroupInput input, float s, int pad, MusicStrip.Metrics? metrics)
     {
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
@@ -188,13 +188,15 @@ public sealed class Monolith : IGroupTheme
         using var font = ThemeFonts.Create(ThemeFonts.Bahn, px);
         float lineH = g.MeasureString("Ag", font, PointF.Empty, ThemeFonts.Tight).Height;
 
-        if (track is { } t && set.StripOrigin is { } origin)
+        if (track is { } t && set.StripOrigin is { } origin && metrics is { } m)
         {
             var stripSave = g.Save();
             g.TranslateTransform(pad + origin.X, pad);
-            var inner = MusicStrip.Measure(g, t, input.Source, s);
             float phase = Environment.TickCount64 / 1000f;
-            MusicStrip.Paint(g, inner, t, input.TrackArt, s, phase, input.Blur ? 150 : 216, input.TrackLevels);
+            // The capped metrics from Layout: measuring again without the cap made the painted
+            // pill wider than the panel the layout had reserved.
+            MusicStrip.Paint(g, m, t, input.TrackArt, s, phase,
+                             input.Blur ? 150 : 216, input.TrackLevels, input.Accent);
             g.Restore(stripSave);
         }
 

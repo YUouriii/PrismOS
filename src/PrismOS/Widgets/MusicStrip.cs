@@ -23,6 +23,11 @@ public static class MusicStrip
     private const float ButtonPx = 28f, ButtonGapPx = 6f, ButtonsRightPx = 8f, TextButtonGapPx = 12f;
     private const float MaxTextWidthPx = 190f;
 
+    // The equalizer column. It used to be 16 px for twelve bands, which left the bars with a
+    // negative width — so the live meter drew nothing at all. At 30 px the meter can fit eight
+    // merged bands with real gaps (see BarGeometry).
+    private const float EqWidthPx = 30f, EqGapPx = 10f, EqHeightPx = 30f;
+
     /// <summary>Everything a painter or a hit-test needs, in panel pixels. All boxes are
     /// relative to the panel's top-left.</summary>
     public readonly record struct Metrics(
@@ -56,7 +61,7 @@ public static class MusicStrip
         // Everything the pill spends on things other than the text: art, gaps, the
         // equalizer column and the transport buttons. The leftover goes to text, clamped
         // so the pill is never wider than the caller's cap.
-        float eqWidth = 16f * scale, eqGap = 10f * scale;
+        float eqWidth = EqWidthPx * scale, eqGap = EqGapPx * scale;
         float buttonsW = ButtonPx * scale * 3 + ButtonGapPx * scale * 2;
         float overhead = secX + eqGap + eqWidth + eqGap + TextButtonGapPx * scale + buttonsW + ButtonsRightPx * scale;
         float textWidth = Math.Min(MaxTextWidthPx * scale, Math.Max(maxWidth - overhead, 8f * scale));
@@ -92,7 +97,7 @@ public static class MusicStrip
         float playX = prevX + btn + gap;
         float nextX = playX + btn + gap;
 
-        float eqH = Math.Min(34f * scale, height * 0.52f);
+        float eqH = Math.Min(EqHeightPx * scale, height * 0.56f);
         return new Metrics(
             new Size((int)Math.Ceiling(total), (int)Math.Ceiling(height)),
             (int)Math.Ceiling(pad), (int)Math.Ceiling(art), (int)Math.Ceiling(ArtGapPx * scale),
@@ -106,18 +111,27 @@ public static class MusicStrip
     }
 
     /// <summary><paramref name="levels"/> carries the live 12-band meter (see LoopbackMeter).
-    /// Null keeps the pre-audio behaviour (deterministic sine) so previews and tests still render.</summary>
-    public static void Paint(Graphics g, in Metrics m, NowPlayingReading r, Bitmap? art, float scale, float eqPhase, int cardAlpha = 216, float[]? levels = null)
+    /// Null keeps the pre-audio behaviour (deterministic sine) so previews and tests still render.
+    /// <paramref name="accent"/> tints the progress line and the no-artwork tile; the default
+    /// (an empty colour) falls back to neutral white for callers that have no accent.</summary>
+    public static void Paint(Graphics g, in Metrics m, NowPlayingReading r, Bitmap? art, float scale, float eqPhase,
+                             int cardAlpha = 216, float[]? levels = null, Color accent = default)
     {
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
 
-        // Card
-        using var path = RoundedRect(new RectangleF(0, 0, m.Size.Width, m.Size.Height), Height * scale * 0.30f);
-        using (var brush = new SolidBrush(Color.FromArgb(Math.Clamp(cardAlpha, 0, 255), 26, 30, 39)))
-            g.FillPath(brush, path);
-        using (var border = new Pen(Color.FromArgb(26, 255, 255, 255), 1f))
+        var card = new RectangleF(0, 0, m.Size.Width, m.Size.Height);
+        float radius = Height * scale * 0.30f;
+        using (var path = RoundedRect(card, radius))
+        {
+            // A surface rather than a flat swatch: the room is a little lighter at the top.
+            using (var brush = new LinearGradientBrush(card,
+                       Color.FromArgb(Math.Clamp(cardAlpha, 0, 255), 34, 38, 49),
+                       Color.FromArgb(Math.Clamp(cardAlpha, 0, 255), 18, 21, 28), 90f))
+                g.FillPath(brush, path);
+            using var border = new Pen(Color.FromArgb(30, 255, 255, 255), 1f);
             g.DrawPath(border, path);
+        }
 
         // Artwork
         using var artPath = RoundedRect(m.ArtBox, ArtSidePx * scale * 0.18f);
@@ -132,19 +146,20 @@ public static class MusicStrip
         }
         else
         {
-            // No thumbnail from the media session: an accent-tinted tile with the
-            // note glyph, instead of a black box with a play icon.
-            using var brush = new LinearGradientBrush(m.ArtBox, Color.FromArgb(255, 58, 44, 84), Color.FromArgb(255, 16, 18, 26), 135f);
-            g.FillPath(brush, artPath);
+            // No thumbnail from the media session: an accent-tinted tile with the note glyph,
+            // instead of a black box with a play icon.
+            PaintArtPlaceholder(g, m.ArtBox, artPath, accent);
         }
+        using (var artEdge = new Pen(Color.FromArgb(34, 255, 255, 255), 1f))
+            g.DrawPath(artEdge, artPath);
 
         // Text column
         float x = m.Pad + m.ArtSide + m.ArtGap;
         using var sourceFont = ThemeFonts.Create(ThemeFonts.TextSemibold, Math.Max(SourcePx * scale, 7f));
         using var titleFont = ThemeFonts.Create(ThemeFonts.TextSemibold, TitlePx * scale);
         using var artistFont = ThemeFonts.Create(ThemeFonts.TextSemibold, Math.Max(ArtistPx * scale, 7f));
-        using var dim = new SolidBrush(Color.FromArgb(150, 255, 255, 255));
-        using var subtle = new SolidBrush(Color.FromArgb(108, 255, 255, 255));
+        using var dim = new SolidBrush(Color.FromArgb(174, 255, 255, 255));
+        using var subtle = new SolidBrush(Color.FromArgb(142, 255, 255, 255));
         using var ink = new SolidBrush(Color.FromArgb(245, 255, 255, 255));
         ThemeFonts.DrawTracked(g, m.SourceText, sourceFont, subtle, x, m.SourceTop, Math.Max(SourcePx * scale, 7f) * 0.15f);
         ThemeFonts.DrawTracked(g, m.TitleText, titleFont, ink, x, m.TitleTop, 0f);
@@ -154,74 +169,199 @@ public static class MusicStrip
         // Equalizer column: real WASAPI-loopback spectrum when the engine supplies it,
         // a playful sine otherwise (previews and tests / no audio device).
         if (levels is not null) PaintEqualizer(g, m.EqBox, levels, r.IsPlaying);
-        else PaintEqualizerSine(g, m.EqBox, eqPhase, scale, r.IsPlaying);
+        else PaintEqualizerSine(g, m.EqBox, eqPhase, r.IsPlaying);
 
         // Transport buttons
         DrawPrevButton(g, m.PrevBox);
         DrawPlayButton(g, m.PlayBox, r.IsPlaying);
         DrawNextButton(g, m.NextBox);
+
+        PaintProgress(g, m, r, scale, accent);
     }
 
     private static string Fit(Graphics g, string text, Font font, float maxWidth, float tracking)
     {
+        text = ThemeFonts.Plain(text);
         if (string.IsNullOrWhiteSpace(text)) return "";
         if (ThemeFonts.MeasureTracked(g, text, font, tracking).Width <= maxWidth) return text;
         for (int len = text.Length - 1; len >= 1; len--)
         {
-            string candidate = text[..len] + "…";
+            // Never between the halves of a surrogate pair: half an emoji draws as a box.
+            if (char.IsHighSurrogate(text[len - 1])) continue;
+            string candidate = text[..len].TrimEnd() + "…";
             if (ThemeFonts.MeasureTracked(g, candidate, font, tracking).Width <= maxWidth) return candidate;
         }
         return "…";
     }
 
-    /// <summary>The real spectrum: one bar per band (12). Bars are filled solid white-ish with
-    /// the current band's magnitude, so the shape dances with the music itself.</summary>
+    // ---- artwork placeholder ---------------------------------------------------------------------
+
+    private static void PaintArtPlaceholder(Graphics g, RectangleF box, GraphicsPath clip, Color accent)
+    {
+        bool tinted = accent.A != 0;
+        Color top = tinted ? Mix(accent, Color.FromArgb(255, 30, 34, 44), 0.62f) : Color.FromArgb(255, 58, 44, 84);
+        Color bottom = tinted ? Mix(accent, Color.FromArgb(255, 14, 16, 22), 0.82f) : Color.FromArgb(255, 16, 18, 26);
+        using (var brush = new LinearGradientBrush(box, top, bottom, 135f))
+            g.FillPath(brush, clip);
+
+        // An eighth note, drawn rather than typed: no icon font to go missing.
+        var state = g.Save();
+        g.SetClip(clip, CombineMode.Replace);
+        float s = Math.Min(box.Width, box.Height);
+        float cx = box.X + box.Width / 2f, cy = box.Y + box.Height / 2f;
+        using (var ink = new SolidBrush(Color.FromArgb(210, 255, 255, 255)))
+        {
+            float headW = s * 0.32f, headH = s * 0.23f;
+            float headX = cx - s * 0.22f, headY = cy + s * 0.10f;
+            // A note head is an egg set at an angle; an upright ellipse read as a stray blob.
+            var head = g.Save();
+            g.TranslateTransform(headX + headW / 2f, headY + headH / 2f);
+            g.RotateTransform(-18f);
+            g.FillEllipse(ink, -headW / 2f, -headH / 2f, headW, headH);
+            g.Restore(head);
+
+            float stemX = headX + headW * 0.78f, stemW = Math.Max(s * 0.055f, 1.5f);
+            float stemTop = cy - s * 0.30f;
+            g.FillRectangle(ink, stemX, stemTop, stemW, headY + headH * 0.68f - stemTop);
+
+            using var flag = new GraphicsPath();
+            flag.AddBezier(stemX + stemW, stemTop,
+                           stemX + s * 0.34f, stemTop + s * 0.03f,
+                           stemX + s * 0.32f, stemTop + s * 0.20f,
+                           stemX + s * 0.10f, stemTop + s * 0.30f);
+            flag.AddBezier(stemX + s * 0.10f, stemTop + s * 0.30f,
+                           stemX + s * 0.24f, stemTop + s * 0.16f,
+                           stemX + stemW, stemTop + s * 0.10f,
+                           stemX + stemW, stemTop);
+            flag.CloseFigure();
+            g.FillPath(ink, flag);
+        }
+        g.Restore(state);
+    }
+
+    // ---- the spectrum ----------------------------------------------------------------------------
+
+    /// <summary>The column is only 30 px wide at scale 1, so twelve bands would be hairlines with
+    /// wider gaps than bars. Fold neighbouring bands together until each bar is a few pixels
+    /// across: a merged meter still moves with the music and reads as a shape.</summary>
+    private static (int Count, float Gap, float BarW) BarGeometry(Rectangle box, int bandCount)
+    {
+        float gap = Math.Max(1f, box.Height * 0.045f);
+        float minBar = Math.Max(2.2f, box.Height * 0.08f);
+        int count = (int)MathF.Floor((box.Width + gap) / (minBar + gap));
+        count = Math.Clamp(count, Math.Min(3, Math.Max(bandCount, 1)), Math.Max(bandCount, 1));
+        float step = (box.Width + gap) / count;
+        return (count, gap, MathF.Max(1f, step - gap));
+    }
+
+    /// <summary>The real spectrum: bars rise with their bands, merged when the column is narrow.
+    /// The peak of a merged group keeps the kick visible instead of averaging the shape away.</summary>
     private static void PaintEqualizer(Graphics g, Rectangle box, float[] bands, bool playing)
     {
-        float gap = Math.Max(2f, box.Width / 56f);
-        int n = bands.Length;
-        float barW = (box.Width - gap * (n - 1)) / n;
-        float maxH = box.Height;
-        using var brush = new SolidBrush(Color.FromArgb(255, 255, 255, 255));
-        for (int i = 0; i < n; i++)
+        if (bands.Length == 0 || box.Width <= 0 || box.Height <= 0) return;
+        var (bars, gap, barW) = BarGeometry(box, bands.Length);
+        using var brush = new SolidBrush(Color.White);
+        using var path = new GraphicsPath();
+        for (int i = 0; i < bars; i++)
         {
-            float mag = Math.Clamp(playing ? bands[i] : 0f, 0f, 1f);
-            float h = maxH * (0.10f + 0.90f * mag);
-            float x = box.X + i * (barW + gap);
-            brush.Color = Color.FromArgb((int)(140 + 115 * mag), 255, 255, 255);
-            g.FillRectangle(brush, x, box.Bottom - h, barW, h);
+            float mag = playing ? BandPeak(bands, i, bars) : 0f;
+            float h = Math.Max(1.5f, box.Height * (0.08f + 0.92f * mag));
+            brush.Color = Color.FromArgb((int)(135 + 120 * mag), 255, 255, 255);
+            FillBar(g, path, brush, box.X + i * (barW + gap), box.Y + box.Height - h, barW, h);
         }
     }
 
-    private static readonly float[] _flat = new float[12];
+    private static float BandPeak(float[] bands, int bar, int bars)
+    {
+        int start = bar * bands.Length / bars;
+        int end = Math.Max(start + 1, (bar + 1) * bands.Length / bars);
+        float peak = 0f;
+        for (int b = start; b < end && b < bands.Length; b++)
+            peak = Math.Max(peak, bands[b]);
+        return Math.Clamp(peak, 0f, 1f);
+    }
 
-    private static void PaintEqualizerSine(Graphics g, Rectangle box, float phase, float scale, bool playing)
+    private static void PaintEqualizerSine(Graphics g, Rectangle box, float phase, bool playing)
     {
         // Base-level (not audio-reactive) bars: each band is a sum of incommensurate
         // sines with slowly drifting phases, so they read as live audio without any
         // capture device or FFT. Settles low and still when paused.
-        float amp = playing ? 1f : 0.16f;
-        int bars = Math.Max(5, (int)(box.Width / Math.Max(3.4f * scale, 2.4f)));
-        float gap = Math.Max(1.6f * scale, 1.2f);
-        float barW = (box.Width - (bars - 1) * gap) / bars;
-        float maxH = box.Height;
+        if (box.Width <= 0 || box.Height <= 0) return;
+        var (bars, gap, barW) = BarGeometry(box, Spectrum.BandCount);
+        float amp = playing ? 1f : 0.32f;
+        using var brush = new SolidBrush(Color.White);
+        using var path = new GraphicsPath();
         for (int i = 0; i < bars; i++)
         {
             float band = amp * (0.55f
                 + 0.28f * MathF.Sin(phase * 12.7f + i * 1.31f)
                 + 0.17f * MathF.Sin(phase * 4.3f + i * 2.07f + 1.1f));
-            float norm = Math.Clamp(band, 0.08f, 1f);
-            float h = maxH * norm;
-            float x = box.X + i * (barW + gap);
-            using var brush = new SolidBrush(Color.FromArgb(245, 255, 255, 255));
-            g.FillRectangle(brush, x, box.Bottom - h, barW, h);
+            float mag = Math.Clamp(band, 0.08f, 1f);
+            float h = box.Height * Math.Max(mag, 0.08f);
+            brush.Color = Color.FromArgb((int)(135 + 120 * Math.Min(1f, mag)), 255, 255, 255);
+            FillBar(g, path, brush, box.X + i * (barW + gap), box.Y + box.Height - h, barW, h);
         }
+    }
+
+    /// <summary>One bar: a rounded cap and a square foot on the meter's baseline.</summary>
+    private static void FillBar(Graphics g, GraphicsPath path, SolidBrush brush, float x, float top, float w, float h)
+    {
+        if (w <= 0f || h <= 0f) return;
+        float r = Math.Min(w / 2f, h);
+        if (r < 0.8f)
+        {
+            g.FillRectangle(brush, x, top, w, h);
+            return;
+        }
+        float d = r * 2f;
+        path.Reset();
+        path.AddArc(x, top, d, d, 180, 90);
+        path.AddArc(x + w - d, top, d, d, 270, 90);
+        path.AddLine(x + w, top + r, x + w, top + h);
+        path.AddLine(x + w, top + h, x, top + h);
+        path.CloseFigure();
+        g.FillPath(brush, path);
+    }
+
+    // ---- progress --------------------------------------------------------------------------------
+
+    /// <summary>A hairline of listened-through time along the bottom edge, when the session reports
+    /// a duration. Live streams report none, and then there is no line rather than a lying one.</summary>
+    private static void PaintProgress(Graphics g, in Metrics m, NowPlayingReading r, float scale, Color accent)
+    {
+        if (r.Progress <= 0.001d || m.Size.Width <= 0) return;
+
+        float lineH = Math.Max(2f, 2.4f * scale);
+        float inset = Height * scale * 0.30f + 2f * scale;
+        float width = m.Size.Width - inset * 2f;
+        if (width <= lineH) return;
+        float y = m.Size.Height - lineH - Math.Max(1.5f * scale, 2f);
+
+        using (var track = new SolidBrush(Color.FromArgb(22, 255, 255, 255)))
+            g.FillPath(track, RoundedRect(new RectangleF(inset, y, width, lineH), lineH / 2f));
+
+        Color fillColour = accent.A == 0
+            ? Color.FromArgb(170, 255, 255, 255)
+            : Color.FromArgb(200, accent);
+        float filled = Math.Max(lineH, width * (float)Math.Clamp(r.Progress, 0d, 1d));
+        using var brush = new SolidBrush(fillColour);
+        g.FillPath(brush, RoundedRect(new RectangleF(inset, y, filled, lineH), lineH / 2f));
+    }
+
+    private static Color Mix(Color a, Color b, float t)
+    {
+        t = Math.Clamp(t, 0f, 1f);
+        return Color.FromArgb(255,
+            (int)Math.Round(a.R * (1 - t) + b.R * t),
+            (int)Math.Round(a.G * (1 - t) + b.G * t),
+            (int)Math.Round(a.B * (1 - t) + b.B * t));
     }
 
     private static GraphicsPath RoundedRect(RectangleF rect, float radius)
     {
         var path = new GraphicsPath();
-        float d = radius * 2;
+        float d = Math.Max(0f, Math.Min(radius * 2, Math.Min(rect.Width, rect.Height)));
+        if (d <= 0f) { path.AddRectangle(rect); return path; }
         path.AddArc(rect.X, rect.Y, d, d, 180, 90);
         path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
         path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
@@ -235,7 +375,7 @@ public static class MusicStrip
 
     private static void DrawPrevButton(Graphics g, RectangleF box)
     {
-        using var circle = new SolidBrush(Color.FromArgb(26, 255, 255, 255));
+        using var circle = new SolidBrush(Color.FromArgb(28, 255, 255, 255));
         g.FillEllipse(circle, box);
         float cx = box.X + box.Width / 2f, cy = box.Y + box.Height / 2f;
         float rad = box.Width * 0.26f;
@@ -273,7 +413,7 @@ public static class MusicStrip
 
     private static void DrawNextButton(Graphics g, RectangleF box)
     {
-        using var circle = new SolidBrush(Color.FromArgb(26, 255, 255, 255));
+        using var circle = new SolidBrush(Color.FromArgb(28, 255, 255, 255));
         g.FillEllipse(circle, box);
         float cx = box.X + box.Width / 2f, cy = box.Y + box.Height / 2f;
         float rad = box.Width * 0.26f;
