@@ -200,7 +200,7 @@ public sealed class NowPlayingOverlay : IDisposable
                         [new PanelBlur.Region(new RectangleF(pad, pad, metrics.Size.Width, metrics.Size.Height), metrics.Size.Height * 0.32f)]);
                 g.TranslateTransform(pad, pad);
                 MusicStrip.Paint(g, metrics, reading, _source.Art, scale, MusicStrip.BarPhase(), _blur ? 136 : 216,
-                                 _readBands?.Invoke(), _style.Accent);
+                                 _readBands?.Invoke(), _style.Accent, _config.Disc.ShowProgress);
                 g.ResetTransform();
                 BakedShadow.DrawBehind(bmp, ShadowRecipe.Default, scale);
             }

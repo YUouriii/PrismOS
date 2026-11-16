@@ -69,6 +69,7 @@ public sealed class Engine : IDisposable
     {
         _config = config;
         _configUnreadable = configUnreadable;
+        _meter.Sensitivity = () => Math.Clamp(_config.Info.Disc.MeterSensitivity, 0.2f, 2.5f);
 
         // The wallpaper side owns windows, renderers and the captured stills; the shell keeps the
         // widgets, the tray and everything that decides what a still means.
@@ -466,7 +467,8 @@ public sealed class Engine : IDisposable
                     ordered.Add(_battery ??= new BatterySource());
                     break;
                 case "nowplaying":
-                    ordered.Add(_nowPlaying ??= new NowPlayingSource(() => _config.Info.MaxCharacters, RunOnMainThread));
+                    ordered.Add(_nowPlaying ??= new NowPlayingSource(() => _config.Info.MaxCharacters,
+                        RunOnMainThread, () => _config.Info.Disc.OnlineArtwork));
                     break;
                 default:
                     Log.Warn($"Unknown info source '{name}' ignored");

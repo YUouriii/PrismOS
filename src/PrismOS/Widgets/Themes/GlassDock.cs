@@ -148,7 +148,7 @@ public sealed class GlassDock : IGroupTheme
                         g.TranslateTransform(box.X + strip!.Value.Pad, box.Y + strip.Value.Pad);
                         float phase = input.Phase;
                         MusicStrip.Paint(g, strip!.Value.Metrics, track!.Value, input.TrackArt, s, phase,
-                                         input.Blur ? 136 : 216, input.TrackLevels, input.Accent);
+                                         input.Blur ? 136 : 216, input.TrackLevels, input.Accent, input.Disc.ShowProgress);
                         g.Restore(stripSave);
                         break;
                     case Kind.Time:

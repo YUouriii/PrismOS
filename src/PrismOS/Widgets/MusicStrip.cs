@@ -87,9 +87,12 @@ public static class MusicStrip
     /// <summary><paramref name="levels"/> carries the live 12-band meter (see LoopbackMeter).
     /// Null keeps the pre-audio behaviour (deterministic sine) so previews and tests still render.
     /// <paramref name="accent"/> tints the progress line and the no-artwork tile; the default
-    /// (an empty colour) falls back to neutral white for callers that have no accent.</summary>
+    /// (an empty colour) falls back to neutral white for callers that have no accent.
+    /// <paramref name="showProgress"/> hides the progress line entirely — the Classic record maps
+    /// this to its ring's visibility.</summary>
     public static void Paint(Graphics g, in Metrics m, NowPlayingReading r, Bitmap? art, float scale, float eqPhase,
-                             int cardAlpha = 216, float[]? levels = null, Color accent = default)
+                             int cardAlpha = 216, float[]? levels = null, Color accent = default,
+                             bool showProgress = true)
     {
         g.SmoothingMode = SmoothingMode.AntiAlias;
         g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
@@ -145,7 +148,7 @@ public static class MusicStrip
         if (levels is not null) PaintEqualizer(g, m.EqBox, levels, r.IsPlaying);
         else PaintEqualizerSine(g, m.EqBox, eqPhase, r.IsPlaying);
 
-        PaintProgress(g, m, r, scale, accent);
+        if (showProgress) PaintProgress(g, m, r, scale, accent);
     }
 
     private static string Fit(Graphics g, string text, Font font, float maxWidth, float tracking)

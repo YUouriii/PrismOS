@@ -165,7 +165,7 @@ public sealed class Poster : IGroupTheme
             float phase = input.Phase;
             g.TranslateTransform(strip.Pad, strip.Pad);
             MusicStrip.Paint(g, strip.Metrics, track, input.TrackArt, s, phase,
-                             input.Blur ? 136 : 216, input.TrackLevels, input.Accent);
+                             input.Blur ? 136 : 216, input.TrackLevels, input.Accent, input.Disc.ShowProgress);
         }
 
         return new GroupPanel("poster-record", new Rectangle(origin, size), Rectangle.Empty, Paint,

@@ -1,5 +1,6 @@
 using System.Drawing;
 using System.Drawing.Imaging;
+using PrismOS.Config;
 using PrismOS.Widgets;
 
 namespace PrismOS.Tests;
@@ -19,14 +20,15 @@ public class MusicStripTests
     }
 
     private static (Bitmap Bitmap, MusicStrip.Metrics Metrics) Render(float[]? levels, bool playing = true,
-                                                                      double progress = 0.42d, float scale = 1f)
+                                                                      double progress = 0.42d, float scale = 1f,
+                                                                      bool showProgress = true)
     {
         var reading = Track with { IsPlaying = playing, Progress = progress };
         using var measure = Graphics.FromHwnd(IntPtr.Zero);
         var m = MusicStrip.Measure(measure, reading, "Spotify", scale);
         var bmp = new Bitmap(m.Size.Width, m.Size.Height, PixelFormat.Format32bppPArgb);
         using var g = Graphics.FromImage(bmp);
-        MusicStrip.Paint(g, m, reading, null, scale, 0.5f, 216, levels, Accent);
+        MusicStrip.Paint(g, m, reading, null, scale, 0.5f, 216, levels, Accent, showProgress);
         return (bmp, m);
     }
 
@@ -42,6 +44,34 @@ public class MusicStripTests
             for (int x = area.Left; x < area.Right; x++)
                 if (IsBright(bmp.GetPixel(x, y))) count++;
         return count;
+    }
+
+    [Fact]
+    public void ProgressLine_NotDrawnWhenDisabled()
+    {
+        var (on, m) = Render(null, progress: 0.42d, showProgress: true);
+        using (on)
+        {
+            var (off, _) = Render(null, progress: 0.42d, showProgress: false);
+            using (off)
+            {
+                var band = new Rectangle(0, m.Size.Height - 9, m.Size.Width, 9);
+                int differing = 0;
+                for (int y = band.Top; y < band.Bottom; y++)
+                    for (int x = band.Left; x < band.Right; x++)
+                        if (off.GetPixel(x, y) != on.GetPixel(x, y)) differing++;
+                Assert.True(differing > 100, "the line is still drawn when progress is switched off");
+            }
+        }
+    }
+
+    [Fact]
+    public void MeterSensitivity_And_OnlineArtwork_Defaults()
+    {
+        var disc = new DiscConfig();
+        Assert.Equal(1f, disc.MeterSensitivity, 3);
+        Assert.True(disc.OnlineArtwork);
+        Assert.True(disc.ShowProgress);
     }
 
     [Fact]

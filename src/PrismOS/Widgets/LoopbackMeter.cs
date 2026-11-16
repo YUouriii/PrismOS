@@ -93,7 +93,7 @@ public sealed class LoopbackMeter : IDisposable
                     _window[i] = _ring[(start + i) % _ring.Length];
                 _count -= Spectrum.FftSize / 2;
                 Interlocked.Increment(ref owner._windows);
-                Spectrum.Magnitudes(_window, rate, Bands, sensitivity: 1.0f);
+                Spectrum.Magnitudes(_window, rate, Bands, owner.Sensitivity?.Invoke() ?? 1f);
             }
             return true;
         }
@@ -107,6 +107,14 @@ public sealed class LoopbackMeter : IDisposable
     private readonly Lock _gate = new();
     private readonly float[] _bands = new float[Spectrum.BandCount];
     private volatile bool _available;
+    private volatile Func<float>? _sensitivity;
+
+    /// <summary>How hard the FFT reacts to the signal. Defaults to 1.0 until the engine sets it.</summary>
+    public Func<float>? Sensitivity
+    {
+        get => _sensitivity;
+        set => _sensitivity = value;
+    }
 
     // Counters for the diagnostics page and for figuring out a silent endpoint: they say whether
     // the capture saw packets, samples and FFT windows, not just whether a device was found.

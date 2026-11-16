@@ -192,7 +192,7 @@ public sealed class Monolith : IGroupTheme
             // The capped metrics from Layout: measuring again without the cap made the painted
             // pill wider than the panel the layout had reserved.
             MusicStrip.Paint(g, m, t, input.TrackArt, s, phase,
-                             input.Blur ? 136 : 216, input.TrackLevels, input.Accent);
+                             input.Blur ? 136 : 216, input.TrackLevels, input.Accent, input.Disc.ShowProgress);
             g.Restore(stripSave);
         }
 

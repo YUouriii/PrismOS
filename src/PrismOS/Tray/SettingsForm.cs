@@ -877,10 +877,13 @@ public sealed class SettingsForm : Form
         var (card, rows) = NewSection("Now playing");
         var disc = _config.Info.Disc;
 
-        rows.AddRow("Show record", Check(disc.Enabled, v => { disc.Enabled = v; ApplyInfo(); }));
+        rows.AddRow("Show music pill", Check(disc.Enabled, v => { disc.Enabled = v; ApplyInfo(); }));
         rows.AddClassicOnly("Size", Spinner(40, 400, disc.Size, v => { disc.Size = v; ApplyInfo(); }, "px"));
-        rows.AddRow("Spin while playing", Check(disc.Rotate, v => { disc.Rotate = v; ApplyInfo(); }));
-        rows.AddRow("Show progress ring", Check(disc.ShowProgress, v => { disc.ShowProgress = v; ApplyInfo(); }));
+        rows.AddClassicOnly("Spin while playing", Check(disc.Rotate, v => { disc.Rotate = v; ApplyInfo(); }));
+        rows.AddRow("Show progress", Check(disc.ShowProgress, v => { disc.ShowProgress = v; ApplyInfo(); }));
+        rows.AddRow("Meter sensitivity", Spinner(20, 250, (int)Math.Round(disc.MeterSensitivity * 100),
+            v => { disc.MeterSensitivity = v / 100f; _engine.SaveConfig(); }, "%"));
+        rows.AddRow("Find cover art online", Check(disc.OnlineArtwork, v => { disc.OnlineArtwork = v; ApplyInfo(); }));
         rows.AddClassicOnly("Accent colour", BuildHaloColorPicker(() => disc.AccentColor, v => disc.AccentColor = v));
 
         rows.AddClassicOnly("Title size", Spinner(8, 96, (int)disc.TitleFontSize,

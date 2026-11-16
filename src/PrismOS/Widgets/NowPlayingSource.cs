@@ -68,6 +68,7 @@ public sealed partial class NowPlayingSource : IWidgetSource
 
     private readonly Func<int> _maxCharacters;
     private readonly Action<Action> _toMainThread;
+    private readonly Func<bool>? _allowOnlineArtwork;
     private Timer? _poll;
     private TypedEventHandler<GlobalSystemMediaTransportControlsSessionManager, CurrentSessionChangedEventArgs>? _onSessionChanged;
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
@@ -183,11 +184,14 @@ public sealed partial class NowPlayingSource : IWidgetSource
     /// to the main thread.
     ///
     /// <paramref name="maxCharacters"/> is read on each format rather than captured, so this
-    /// source outlives a settings change and the media session is not rebuilt for one.</summary>
-    public NowPlayingSource(Func<int> maxCharacters, Action<Action> toMainThread)
+    /// source outlives a settings change and the media session is not rebuilt for one.
+    /// <paramref name="allowOnlineArtwork"/> is likewise read live, so the Behaviour page's
+    /// cover-art toggle takes effect without a restart.</summary>
+    public NowPlayingSource(Func<int> maxCharacters, Action<Action> toMainThread, Func<bool>? allowOnlineArtwork = null)
     {
         _maxCharacters = maxCharacters;
         _toMainThread = toMainThread;
+        _allowOnlineArtwork = allowOnlineArtwork;
         _ = InitialiseAsync();
     }
 
@@ -334,7 +338,7 @@ public sealed partial class NowPlayingSource : IWidgetSource
                             artSource = "media session";
                         }
                     }
-                    if (fetchedArt is null && artKey != _onlineKey)
+                    if (fetchedArt is null && (_allowOnlineArtwork?.Invoke() ?? true) && artKey != _onlineKey)
                     {
                         _onlineKey = artKey;   // one lookup per track, even while retrying the session
                         fetchedArt = await OnlineArt.Find(props?.Title, props?.Artist);

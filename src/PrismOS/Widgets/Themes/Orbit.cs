@@ -74,7 +74,7 @@ public sealed class Orbit : IGroupTheme
                 // The layout's metrics and the overlay's phase: shared with the size and animation
                 // of every other style, so nothing drifts or races here.
                 MusicStrip.Paint(g, sl.Metrics, t, input.TrackArt, s, input.Phase,
-                                 input.Blur ? 136 : 216, input.TrackLevels, input.Accent);
+                                 input.Blur ? 136 : 216, input.TrackLevels, input.Accent, input.Disc.ShowProgress);
                 g.Restore(save);
             }
             if (battery is not null) PaintBatteryRing(g, ring, input, s, caption, captionFont, tracking);

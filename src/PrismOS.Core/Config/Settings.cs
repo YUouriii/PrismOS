@@ -181,16 +181,25 @@ public sealed class InfoConfig
     public DiscConfig Disc { get; set; } = new();
 }
 
-/// <summary>The now-playing record: album art on the label, turning while the music plays.
-///
-/// Rotate is the only thing in PrismOS that starts a timer. Setting it false gives the whole
-/// design — art, progress, the lot — as a still image, and creates no timer at all.</summary>
+/// <summary>The now-playing widget: album art, artist and title, a live audio meter and a progress
+/// line — the Classic record is built from the same renderer with Rotate driving its spin.
+/// Rotate is the only thing that starts a timer. Setting it false gives the whole design — art,
+/// progress, the lot — as a still image, and creates no timer at all.</summary>
 public sealed class DiscConfig
 {
     public bool Enabled { get; set; } = true;
     public int Size { get; set; } = 112;
     public bool Rotate { get; set; } = true;
     public bool ShowProgress { get; set; } = true;
+
+    /// <summary>How hard the live meter reacts to the audio, 0.2 (barely a whisper) to 2.5
+    /// (fierce). 1.0 is neutral.</summary>
+    public float MeterSensitivity { get; set; } = 1f;
+
+    /// <summary>When a track has no artwork in the media session, look the cover up on iTunes'
+    /// public search API using the artist and title. Switched off for anyone who would rather a
+    /// wallpaper never touch the network.</summary>
+    public bool OnlineArtwork { get; set; } = true;
 
     /// <summary>Its own anchor, independent of the info text and the halo — the record is its own
     /// block, not a line in a list.</summary>
