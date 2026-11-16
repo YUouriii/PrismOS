@@ -24,6 +24,34 @@ public static class MusicArt
         }
     }
 
+    /// <summary>Some browser sessions publish the site or app icon as their "artwork". Compare a
+    /// decoded thumbnail to the source app's icon so a fake cover can be replaced by a real lookup.</summary>
+    public static bool SameBitmap(Bitmap? a, Bitmap? b)
+    {
+        if (a is null || b is null || a.Size != b.Size) return false;
+        var ra = new Rectangle(0, 0, a.Width, a.Height);
+        var rb = new Rectangle(0, 0, b.Width, b.Height);
+        var da = a.LockBits(ra, System.Drawing.Imaging.ImageLockMode.ReadOnly, a.PixelFormat);
+        var db = b.LockBits(rb, System.Drawing.Imaging.ImageLockMode.ReadOnly, b.PixelFormat);
+        try
+        {
+            if (da.Stride != db.Stride) return false;
+            int bytes = da.Stride * a.Height;
+            unsafe
+            {
+                byte* pa = (byte*)da.Scan0, pb = (byte*)db.Scan0;
+                for (int i = 0; i < bytes; i++)
+                    if (pa[i] != pb[i]) return false;
+            }
+            return true;
+        }
+        finally
+        {
+            a.UnlockBits(da);
+            b.UnlockBits(db);
+        }
+    }
+
     private static string? Executable(string? aumid, string? friendlyName)
     {
         if (!string.IsNullOrWhiteSpace(aumid) && File.Exists(aumid)) return aumid;

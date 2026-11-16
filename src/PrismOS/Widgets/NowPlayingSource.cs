@@ -83,6 +83,7 @@ public sealed partial class NowPlayingSource : IWidgetSource
     private string? _artTrackId;
     private string _artKey = "";
     private string _iconKey = "";
+    private string _onlineKey = "";
     private volatile string _wantedArtKey = "";
     private int _refreshBusy;
     private string? _sourceApp;
@@ -320,19 +321,29 @@ public sealed partial class NowPlayingSource : IWidgetSource
                     fetchedArt = await LoadArtAsync(props?.Thumbnail);
                     if (fetchedArt is not null)
                     {
-                        artSource = "media session";
-                    }
-                    else if (artKey != _iconKey)
-                    {
-                        // A browser with no session thumbnail can still have a real cover online.
-                        // Look it up once per track, then fall back to the source app's icon.
-                        fetchedArt = await OnlineArt.Find(props?.Title, props?.Artist);
-                        if (fetchedArt is not null) artSource = "online search";
+                        // A browser can hand us its own icon disguised as artwork. Don't let that
+                        // count as real art — fall through to the real cover lookup.
+                        using var appIcon = MusicArt.ForSource(aumid, FriendlySourceName(aumid));
+                        if (MusicArt.SameBitmap(fetchedArt, appIcon))
+                        {
+                            fetchedArt.Dispose();
+                            fetchedArt = null;
+                        }
                         else
                         {
-                            fetchedArt = MusicArt.ForSource(aumid, FriendlySourceName(aumid));
-                            artSource = "source app";
+                            artSource = "media session";
                         }
+                    }
+                    if (fetchedArt is null && artKey != _onlineKey)
+                    {
+                        _onlineKey = artKey;   // one lookup per track, even while retrying the session
+                        fetchedArt = await OnlineArt.Find(props?.Title, props?.Artist);
+                        if (fetchedArt is not null) artSource = "online search";
+                    }
+                    if (fetchedArt is null)
+                    {
+                        fetchedArt = MusicArt.ForSource(aumid, FriendlySourceName(aumid));
+                        artSource = "source app";
                     }
                     if (fetchedArt is not null)
                         Log.Info($"Now playing: art from the {artSource}");
