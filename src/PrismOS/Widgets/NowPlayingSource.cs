@@ -83,6 +83,8 @@ public sealed partial class NowPlayingSource : IWidgetSource
     private string? _artTrackId;
     private string _artKey = "";
     private string _iconKey = "";
+    private volatile string _wantedArtKey = "";
+    private int _refreshBusy;
     private string? _sourceApp;
 
     /// <summary>The media app's AUMID as Windows reports it, e.g. "Spotify.exe" or
@@ -262,6 +264,23 @@ public sealed partial class NowPlayingSource : IWidgetSource
 
     private async Task RefreshAsync()
     {
+        // A poll every 1.5 s used to start a second read while the first was still fetching art.
+        // The newer generation then made the older one stale, its freshly fetched bitmap was
+        // disposed, and the next poll did the same — so artwork never landed after a track change.
+        // One read at a time keeps the generation guard from starving the slow art fetch.
+        if (Interlocked.Exchange(ref _refreshBusy, 1) != 0) return;
+        try
+        {
+            await RefreshOnceAsync();
+        }
+        finally
+        {
+            Volatile.Write(ref _refreshBusy, 0);
+        }
+    }
+
+    private async Task RefreshOnceAsync()
+    {
         // Each event starts its own task, so two reads can be in flight at once and the older one
         // can finish last. Without this an outdated title overwrites the current one, and
         // comparing against _value does not catch it because the values genuinely differ.
@@ -294,6 +313,7 @@ public sealed partial class NowPlayingSource : IWidgetSource
                 // is ready, leaving the icon cached for the whole track. Keep retrying the session
                 // thumbnail while we only have a fallback; stop once real art has been applied.
                 artKey = $"{aumid}|{reading.TrackId}";
+                _wantedArtKey = artKey;
                 bool haveRealArt = artKey == _artKey;
                 if (!haveRealArt)
                 {
@@ -330,30 +350,34 @@ public sealed partial class NowPlayingSource : IWidgetSource
 
         _toMainThread(() =>
         {
-            if (_disposed || generation != Volatile.Read(ref _generation))
+            if (_disposed)
             {
-                fetchedArt?.Dispose();       // a superseded read must not leak its bitmap
+                fetchedArt?.Dispose();
                 return;
             }
 
-            bool trackChanged = reading.TrackId != _artTrackId;
-            bool artApplied = fetchedArt is not null && artKey.Length > 0 && artKey != _artKey
+            bool current = generation == Volatile.Read(ref _generation);
+            bool artForWanted = artKey.Length > 0 && artKey == _wantedArtKey;
+            bool artApplied = fetchedArt is not null && artForWanted
                               && (artSource != "source app" || artKey != _iconKey);
-            if (trackChanged || artApplied)
+            if (artApplied)
             {
                 _art?.Dispose();
                 _art = fetchedArt;
-                _artTrackId = reading.TrackId;
-                if (artApplied)
-                {
-                    if (artSource == "source app") _iconKey = artKey;
-                    else { _artKey = artKey; _iconKey = artKey; }
-                }
+                if (artSource == "source app") _iconKey = artKey;
+                else { _artKey = artKey; _iconKey = artKey; }
             }
-            else
+            else if (!current || !artForWanted)
             {
                 fetchedArt?.Dispose();
             }
+
+            // A stale read must not overwrite the title or progress of a newer one; its artwork
+            // was still applied above if it belonged to the track we want now.
+            if (!current) return;
+
+            bool trackChanged = reading.TrackId != _artTrackId;
+            _artTrackId = reading.TrackId;
 
             // A browser can report a duration and still report Position = 0 on every poll. Resetting
             // our clock to that stale zero made the bar fill for a second and snap back. Accept the
