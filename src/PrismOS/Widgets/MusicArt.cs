@@ -24,32 +24,51 @@ public static class MusicArt
         }
     }
 
-    /// <summary>Some browser sessions publish the site or app icon as their "artwork". Compare a
-    /// decoded thumbnail to the source app's icon so a fake cover can be replaced by a real lookup.</summary>
+    /// <summary>Some browser sessions publish the site or app icon as their "artwork". Compare the
+    /// decoded content downscaled to a fixed grid so a scaled-up icon still matches the app icon.</summary>
     public static bool SameBitmap(Bitmap? a, Bitmap? b)
     {
-        if (a is null || b is null || a.Size != b.Size) return false;
-        var ra = new Rectangle(0, 0, a.Width, a.Height);
-        var rb = new Rectangle(0, 0, b.Width, b.Height);
-        var da = a.LockBits(ra, System.Drawing.Imaging.ImageLockMode.ReadOnly, a.PixelFormat);
-        var db = b.LockBits(rb, System.Drawing.Imaging.ImageLockMode.ReadOnly, b.PixelFormat);
+        if (a is null || b is null) return false;
         try
         {
-            if (da.Stride != db.Stride) return false;
-            int bytes = da.Stride * a.Height;
-            unsafe
+            using var smallA = Resize(a, 16, 16);
+            using var smallB = Resize(b, 16, 16);
+            var ra = new Rectangle(0, 0, smallA.Width, smallA.Height);
+            var rb = new Rectangle(0, 0, smallB.Width, smallB.Height);
+            var format = System.Drawing.Imaging.PixelFormat.Format32bppArgb;
+            var da = smallA.LockBits(ra, System.Drawing.Imaging.ImageLockMode.ReadOnly, format);
+            var db = smallB.LockBits(rb, System.Drawing.Imaging.ImageLockMode.ReadOnly, format);
+            try
             {
-                byte* pa = (byte*)da.Scan0, pb = (byte*)db.Scan0;
-                for (int i = 0; i < bytes; i++)
-                    if (pa[i] != pb[i]) return false;
+                if (da.Stride != db.Stride) return false;
+                int bytes = da.Stride * smallA.Height;
+                unsafe
+                {
+                    byte* pa = (byte*)da.Scan0, pb = (byte*)db.Scan0;
+                    long total = 0;
+                    for (int i = 0; i < bytes; i++) total += Math.Abs(pa[i] - pb[i]);
+                    // A flat icon scaled to a different size differs by single digits per byte;
+                    // a different picture differs by hundreds.
+                    return total / bytes < 6;
+                }
             }
-            return true;
+            finally
+            {
+                smallA.UnlockBits(da);
+                smallB.UnlockBits(db);
+            }
         }
-        finally
-        {
-            a.UnlockBits(da);
-            b.UnlockBits(db);
-        }
+        catch { return false; }
+    }
+
+    private static Bitmap Resize(Bitmap source, int width, int height)
+    {
+        var result = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(result);
+        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+        g.DrawImage(source, 0, 0, width, height);
+        return result;
     }
 
     private static string? Executable(string? aumid, string? friendlyName)

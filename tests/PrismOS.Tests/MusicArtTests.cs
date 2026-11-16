@@ -14,9 +14,12 @@ public class MusicArtTests
         using var other = new Bitmap(32, 32);
         using (var g = Graphics.FromImage(other)) g.Clear(Color.CornflowerBlue);
 
-        Assert.True(MusicArt.SameBitmap(icon, copy));
-        Assert.False(MusicArt.SameBitmap(icon, other));
+        Assert.True(MusicArt.SameBitmap(icon, copy), "identical bitmap must match");
+        using var large = new Bitmap(icon, new Size(48, 48));
+        Assert.True(MusicArt.SameBitmap(icon, large), "upscaled icon must match");
+        Assert.False(MusicArt.SameBitmap(icon, other), "different colour must not match");
         using var differentSize = new Bitmap(48, 48);
-        Assert.False(MusicArt.SameBitmap(icon, differentSize));
+        using (var g = Graphics.FromImage(differentSize)) g.Clear(Color.CornflowerBlue);
+        Assert.False(MusicArt.SameBitmap(icon, differentSize), "different size must not match");
     }
 }
