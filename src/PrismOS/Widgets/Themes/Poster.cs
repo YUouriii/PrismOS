@@ -168,7 +168,13 @@ public sealed class Poster : IGroupTheme
                              input.Blur ? 150 : 216, input.TrackLevels, input.Accent);
         }
 
-        return new GroupPanel("poster-record", new Rectangle(origin, size), Rectangle.Empty, Paint, HasStrip: true);
+        return new GroupPanel("poster-record", new Rectangle(origin, size), Rectangle.Empty, Paint,
+            CardRegions:
+            [
+                new PanelBlur.Region(new RectangleF(strip.Pad, strip.Pad,
+                    strip.Metrics.Size.Width, strip.Metrics.Size.Height), strip.Metrics.Size.Height * 0.3f),
+            ],
+            HasStrip: true);
     }
 
     // ---- battery bar --------------------------------------------------------------------------

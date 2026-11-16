@@ -99,6 +99,11 @@ public static class GroupThemes
                 // pill drift away from the size the panel was built with.
                 MusicStrip.Paint(g, layout.Metrics, track, art, scale, phase, 216, null);
             },
+            CardRegions:
+            [
+                new PanelBlur.Region(new RectangleF(layout.Pad, layout.Pad,
+                    layout.Metrics.Size.Width, layout.Metrics.Size.Height), layout.Metrics.Size.Height * 0.3f),
+            ],
             HasStrip: true);
     }
 

@@ -16,7 +16,7 @@ public sealed class GlassDock : IGroupTheme
 
     private const float TimePx = 74f, DatePx = 15f, Battery = 74f, Gap = 26f, PadY = 22f, PadLeft = 24f, PadRight = 24f, Edge = 30f;
 
-    private enum Kind { Strip, Separator, Time, Date, Battery }
+    private enum Kind { Strip, Separator, Time, Date, Battery, Spacer }
 
     public IReadOnlyList<GroupPanel> Layout(GroupInput input)
     {
@@ -83,6 +83,23 @@ public sealed class GlassDock : IGroupTheme
         }
 
         float gap = GroupThemes.U(Gap, s), padY = GroupThemes.U(PadY, s);
+
+        // Keep the music card at the exact centre of the capsule. With no battery (most desktops)
+        // the strip used to end up in the right half; with a wide clock the reverse happened. Pad
+        // the lighter side with an invisible spacer so the strip sits on the centre line regardless
+        // of which widgets are present.
+        int stripAt = items.FindIndex(it => it.Kind == Kind.Strip);
+        if (stripAt >= 0)
+        {
+            float before = items.Take(stripAt).Sum(it => it.W) + gap * stripAt;
+            float after = items.Skip(stripAt + 1).Sum(it => it.W) + gap * (items.Count - stripAt - 1);
+            float spacer = Math.Abs(before - after) - gap;
+            if (spacer > 0.5f)
+            {
+                if (before < after) items.Insert(0, (Kind.Spacer, spacer, 0f));
+                else items.Add((Kind.Spacer, spacer, 0f));
+            }
+        }
         float padLeft = GroupThemes.U(items[0].Kind == Kind.Strip ? PadLeft : PadRight, s);
         float padRight = GroupThemes.U(items[^1].Kind == Kind.Battery ? PadLeft : PadRight, s);
         float contentW = items.Sum(it => it.W) + gap * (items.Count - 1);
@@ -118,13 +135,17 @@ public sealed class GlassDock : IGroupTheme
             {
                 switch (kind)
                 {
+                    case Kind.Spacer:
+                        break;
                     case Kind.Separator:
                         using (var sep = new Pen(Color.FromArgb(31, 255, 255, 255), 1f))
                             g.DrawLine(sep, box.X, capsule.Y + padY + GroupThemes.U(6f, s), box.X, capsule.Bottom - padY - GroupThemes.U(6f, s));
                         break;
                     case Kind.Strip:
                         var stripSave = g.Save();
-                        g.TranslateTransform(box.X, box.Y);
+                        // The slot reserves the strip's shadow pad on every side; the card itself is
+                        // metrics-sized, so step inside the pad or it sits high and left of centre.
+                        g.TranslateTransform(box.X + strip!.Value.Pad, box.Y + strip.Value.Pad);
                         float phase = input.Phase;
                         MusicStrip.Paint(g, strip!.Value.Metrics, track!.Value, input.TrackArt, s, phase,
                                          input.Blur ? 150 : 216, input.TrackLevels, input.Accent);
