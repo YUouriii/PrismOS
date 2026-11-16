@@ -148,7 +148,7 @@ public sealed class GlassDock : IGroupTheme
                         g.TranslateTransform(box.X + strip!.Value.Pad, box.Y + strip.Value.Pad);
                         float phase = input.Phase;
                         MusicStrip.Paint(g, strip!.Value.Metrics, track!.Value, input.TrackArt, s, phase,
-                                         input.Blur ? 150 : 216, input.TrackLevels, input.Accent);
+                                         input.Blur ? 136 : 216, input.TrackLevels, input.Accent);
                         g.Restore(stripSave);
                         break;
                     case Kind.Time:
@@ -189,8 +189,8 @@ public sealed class GlassDock : IGroupTheme
     private static void PaintCapsule(Graphics g, RectangleF r, bool blur)
     {
         using var path = Capsule(r);
-        using (var glass = new LinearGradientBrush(r, blur ? Color.FromArgb(92, 28, 22, 40) : Color.FromArgb(158, 28, 22, 40),
-                                                     blur ? Color.FromArgb(108, 12, 10, 18) : Color.FromArgb(184, 12, 10, 18), 90f))
+        using (var glass = new LinearGradientBrush(r, blur ? Color.FromArgb(86, 28, 22, 40) : Color.FromArgb(158, 28, 22, 40),
+                                                     blur ? Color.FromArgb(102, 12, 10, 18) : Color.FromArgb(184, 12, 10, 18), 90f))
             g.FillPath(glass, path);
         using (var border = new Pen(Color.FromArgb(15, 255, 255, 255), 1f))
             g.DrawPath(border, path);

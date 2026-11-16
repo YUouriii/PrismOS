@@ -777,10 +777,24 @@ public sealed class Engine : IDisposable
     public string? MonitorStillPath(MonitorInfo monitor)
     {
         var path = _config.WallpaperFor(monitor.Device);
-        if (path is null) return null;
-        if (WallpaperService.IsImage(path)) return File.Exists(path) ? path : null;
-        var frame = WallpaperFiles.StaticPath(monitor.Device);
-        return File.Exists(frame) ? frame : null;
+        if (path is not null && File.Exists(path))
+        {
+            if (WallpaperService.IsImage(path)) return path;
+            var frame = WallpaperFiles.StaticPath(monitor.Device);
+            if (File.Exists(frame)) return frame;
+        }
+        // The configured file can be missing (moved or deleted) or a video may not have produced a
+        // still yet. Frost with what Windows is actually painting instead of a stale frame: using
+        // an old video's still made every card look black while the desktop behind was bright.
+        try
+        {
+            string current = DesktopWallpaper.GetCurrent();
+            return !string.IsNullOrWhiteSpace(current) && File.Exists(current) ? current : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>Applies the configured wallpaper to the lock screen as well. The lock screen

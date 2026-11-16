@@ -91,7 +91,7 @@ public sealed class Tiles : IGroupTheme
                         var musicSave = g.Save();
                         g.TranslateTransform(box.X + stripInnerX, box.Y);
                         MusicStrip.Paint(g, stripMetrics!.Value, track!.Value, input.TrackArt, stripScale, input.Phase,
-                                         input.Blur ? 150 : 216, input.TrackLevels, input.Accent);
+                                         input.Blur ? 136 : 216, input.TrackLevels, input.Accent);
                         g.Restore(musicSave);
                         break;
                     case "battery": PaintBattery(g, box, input, s, inner); break;
@@ -110,7 +110,7 @@ public sealed class Tiles : IGroupTheme
     private static void PaintCard(Graphics g, RectangleF box, float s, bool blur)
     {
         using var path = Rounded(box, GroupThemes.U(Radius, s));
-        using (var fill = new SolidBrush(Color.FromArgb(blur ? 120 : 184, 18, 20, 26))) g.FillPath(fill, path);
+        using (var fill = new SolidBrush(Color.FromArgb(blur ? 104 : 184, 18, 20, 26))) g.FillPath(fill, path);
         using var edge = new Pen(Edge, 1f);
         g.DrawPath(edge, path);
     }
