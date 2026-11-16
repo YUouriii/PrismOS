@@ -139,9 +139,34 @@ public sealed class CpuVideoDecoder : IDisposable
         outType.Set(MediaTypeAttributeKeys.FrameRate, MediaFactory.PackRatio(30, 1));
         outType.Set(MediaTypeAttributeKeys.DefaultStride, (ulong)(_width * 4));
         reader.SetCurrentMediaType((int)SourceReaderIndex.FirstVideoStream, outType);
-        // The preview is muted; do not spend cycles on the audio path.
-        reader.SetStreamSelection((int)SourceReaderIndex.FirstAudioStream, false);
+        // Don't assume stream 1 is audio — a 4K file can lead with a data or subtitle track and
+        // have no audio at all, and unselecting a non-existent stream fails with
+        // MF_E_INVALIDSTREAMNUMBER. Walk every stream instead and disable anything not video.
+        DisableNonVideoStreams(reader);
         return reader;
+    }
+
+    /// <summary>Walks the stream list and unselects everything that is not video, so files with a
+    /// leading data track, multiple audio tracks or no audio at all keep only the video.</summary>
+    private static void DisableNonVideoStreams(IMFSourceReader reader)
+    {
+        for (int i = 0; i < 16; i++)
+        {
+            IMFMediaType? type = null;
+            try
+            {
+                type = reader.GetNativeMediaType(i, 0);
+            }
+            catch
+            {
+                break;   // MF_E_INVALIDSTREAMNUMBER: no more streams
+            }
+            using (type)
+            {
+                var major = type.MajorType;
+                if (major != MediaTypeGuids.Video) reader.SetStreamSelection(i, false);
+            }
+        }
     }
 
     /// <summary>Copies the contiguous RGB32 sample into a Bitmap. RGB32 in memory is B,G,R,X —
