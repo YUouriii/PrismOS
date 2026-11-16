@@ -147,35 +147,13 @@ public sealed class WidgetsConfig
     }
 }
 
-/// <summary>The info widget: a stack of lines fed by system sources, anchored independently of
-/// the clock. Disabled by default — an upgrade must render exactly as it did before, the same
-/// rule the date-styling defaults follow.</summary>
+/// <summary>What a theme needs that isn't the clock: the battery's halo and the now-playing pill.
+/// The text-line widget was removed entirely in favour of those two.</summary>
 public sealed class InfoConfig
 {
-    public bool Enabled { get; set; } = false;
-    public string Monitor { get; set; } = "*";
-    public ClockAnchor Anchor { get; set; } = ClockAnchor.BottomLeft;
-    public int MarginX { get; set; } = 48;
-    public int MarginY { get; set; } = 48;
-
-    /// <summary>Per-edge overrides, null inheriting MarginX/MarginY, exactly as ClockConfig does.</summary>
-    public int? MarginLeft { get; set; }
-    public int? MarginRight { get; set; }
-    public int? MarginTop { get; set; }
-    public int? MarginBottom { get; set; }
-
-    public float FontSize { get; set; } = 22f;
-    public string FontFamily { get; set; } = "Segoe UI";
-    public string Color { get; set; } = "#C0FFFFFF";
-    public bool Shadow { get; set; } = true;
-
     /// <summary>Truncation budget. Scrolling a long title would mean animating, and animating
     /// means waking up.</summary>
     public int MaxCharacters { get; set; } = 48;
-
-    /// <summary>Ordered; the order is the display order. An unknown name is logged and skipped
-    /// rather than throwing, so a config written by a later version still starts this one.</summary>
-    public List<string> Sources { get; set; } = ["nowPlaying", "battery"];
 
     public HaloConfig Halo { get; set; } = new();
     public DiscConfig Disc { get; set; } = new();

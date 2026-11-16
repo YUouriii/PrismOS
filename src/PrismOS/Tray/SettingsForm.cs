@@ -56,7 +56,6 @@ public sealed class SettingsForm : Form
     /// after that it is Classic's alone, and says so.</summary>
     private Label? _clockFontSizeCaption;
     private readonly List<ThemeTile> _tiles = [];
-    private Label? _styleHint;
     private ColorChip? _accentSwatch;
     private Label? _accentHex;
 
@@ -178,7 +177,6 @@ public sealed class SettingsForm : Form
         AddPage(host, rail, "Style", BuildStyleSection());
         AddPage(host, rail, "Clock", BuildClockSection());
         AddPage(host, rail, "Date", BuildDateSection());
-        AddPage(host, rail, "Info", BuildInfoSection());
         if (_batteryAvailable) AddPage(host, rail, "Battery", BuildHaloSection());
         AddPage(host, rail, "Music", BuildDiscSection());
         AddPage(host, rail, "Wallpaper", BuildWallpaperSection());
@@ -333,15 +331,6 @@ public sealed class SettingsForm : Form
         rows.AddGroupOnly("Position", _groupPositionHost);
         rows.AddGroupOnly("Monitor", BuildGroupMonitorChoice());
 
-        _styleHint = new Label
-        {
-            Text = "Turn on the Info widget, with Now playing and Battery, to see the full set.",
-            AutoSize = true,
-            MaximumSize = new Size(ContentWidth - 32, 0),
-            ForeColor = Theme.Colors.Subtle,
-            Margin = new Padding(0, 8, 0, 0),
-        };
-        card.Controls.Add(_styleHint);
         return card;
     }
 
@@ -457,9 +446,6 @@ public sealed class SettingsForm : Form
         bool group = WidgetsConfig.IsGroup(theme);
         foreach (var control in _groupRows) control.Visible = group;
         RebuildGroupPosition(theme);
-        if (_styleHint is not null)
-            _styleHint.Visible = theme != WidgetTheme.Classic
-                && !(_config.Info.Enabled && HasSource("nowPlaying") && HasSource("battery"));
         RefreshClassicOnly();
         _preview.Invalidate();
         ResizeToActivePage();
@@ -654,44 +640,6 @@ public sealed class SettingsForm : Form
     }
 
     private const string SameAsTime = "(same as time)";
-
-    /// <summary>The info widget's page. Off by default and off in a fresh config, so this is
-    /// where it gets turned on — the feature is meant to need no JSON editing at all.
-    ///
-    /// The now-playing line is worth a word of warning here rather than in the docs: it shows
-    /// whatever has a media session, a browser tab included, on a desktop other people can see.</summary>
-    private Control BuildInfoSection()
-    {
-        var (card, rows) = NewSection("Info widget");
-        var info = _config.Info;
-
-        rows.AddRow("Show info widget", Check(info.Enabled, v => { info.Enabled = v; ApplyInfo(); }));
-        rows.AddRow("Now playing", Check(HasSource("nowPlaying"), v => { SetSource("nowPlaying", v); ApplyInfo(); }));
-
-        if (_batteryAvailable)
-        {
-            rows.AddRow("Battery", Check(HasSource("battery"), v => { SetSource("battery", v); ApplyInfo(); }));
-            rows.AddRow("Order", Choice(["Now playing first", "Battery first"], NowPlayingIsFirst() ? 0 : 1,
-                i => { SetOrder(nowPlayingFirst: i == 0); ApplyInfo(); }));
-        }
-        rows.AddRow("Max characters", Spinner(10, 200, info.MaxCharacters,
-            v => { info.MaxCharacters = v; ApplyInfo(); }, "chars"));
-        rows.AddClassicOnly("Drop shadow", Check(info.Shadow, v => { info.Shadow = v; ApplyInfo(); }));
-        rows.AddPlacement("Position", BuildAnchorPicker(() => info.Anchor, v => info.Anchor = v, ApplyInfo));
-        rows.AddPlacement("Margin X", Spinner(0, 2000, info.MarginX, v => { info.MarginX = v; ApplyInfo(); }, "px"));
-        rows.AddPlacement("Margin Y", Spinner(0, 2000, info.MarginY, v => { info.MarginY = v; ApplyInfo(); }, "px"));
-        rows.AddClassicOnly("Font size", Spinner(10, 200, (int)info.FontSize, v => { info.FontSize = v; ApplyInfo(); }, "px"));
-        rows.AddClassicOnly("Font", BuildFontPicker(() => info.FontFamily, v => info.FontFamily = v, apply: ApplyInfo));
-        rows.AddClassicOnly("Colour", BuildInfoColorPicker());
-        rows.AddClassicOnly("Opacity", Spinner(10, 100, (int)Math.Round(InfoAlpha() / 2.55), v =>
-        {
-            SetInfoColor(InfoRgb(), (int)Math.Round(v * 2.55));
-            if (_infoColorHex is not null) _infoColorHex.Text = _config.Info.Color.ToUpperInvariant();
-            ApplyInfo();
-        }, "%"));
-
-        return card;
-    }
 
     // ---- battery halo -------------------------------------------------------------------
 
@@ -901,103 +849,7 @@ public sealed class SettingsForm : Form
         return card;
     }
 
-    private bool HasSource(string name) =>
-        _config.Info.Sources.Any(s => string.Equals(s, name, StringComparison.OrdinalIgnoreCase));
-
-    /// <summary>Adding appends, so turning a source back on does not silently reorder the other
-    /// one. The Order row is what moves them.</summary>
-    private void SetSource(string name, bool on)
-    {
-        if (on)
-        {
-            if (!HasSource(name)) _config.Info.Sources.Add(name);
-        }
-        else
-        {
-            _config.Info.Sources.RemoveAll(s => string.Equals(s, name, StringComparison.OrdinalIgnoreCase));
-        }
-    }
-
-    private bool NowPlayingIsFirst()
-    {
-        int now = _config.Info.Sources.FindIndex(s => string.Equals(s, "nowPlaying", StringComparison.OrdinalIgnoreCase));
-        int battery = _config.Info.Sources.FindIndex(s => string.Equals(s, "battery", StringComparison.OrdinalIgnoreCase));
-        if (now < 0) return false;
-        if (battery < 0) return true;
-        return now < battery;
-    }
-
-    /// <summary>Reorders without adding: a source the user switched off stays off.</summary>
-    private void SetOrder(bool nowPlayingFirst)
-    {
-        var ordered = new List<string>();
-        foreach (var name in nowPlayingFirst ? new[] { "nowPlaying", "battery" } : ["battery", "nowPlaying"])
-            if (HasSource(name)) ordered.Add(name);
-        // Anything a later version wrote is preserved rather than dropped on the floor.
-        ordered.AddRange(_config.Info.Sources.Where(s =>
-            !string.Equals(s, "nowPlaying", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(s, "battery", StringComparison.OrdinalIgnoreCase)));
-        _config.Info.Sources = ordered;
-    }
-
-    private Color InfoColor() => ClockRenderer.ParseColor(_config.Info.Color);
-    /// <summary>The colour without its alpha — the swatch and the dialog work in RGB, and the
-    /// opacity spinner owns the alpha channel separately.</summary>
-    private Color InfoRgb()
-    {
-        var c = InfoColor();
-        return Color.FromArgb(c.R, c.G, c.B);
-    }
-    private int InfoAlpha() => InfoColor().A;
-
-    private void SetInfoColor(Color rgb, int alpha) =>
-        _config.Info.Color = $"#{alpha:X2}{rgb.R:X2}{rgb.G:X2}{rgb.B:X2}";
-
-    /// <summary>Its own button rather than a parameterised BuildColorPicker: that one owns two
-    /// form fields bound to the clock, and threading a second target through them would make the
-    /// clock's picker harder to follow for no gain here.</summary>
-    private Control BuildInfoColorPicker()
-    {
-        var button = new ColorChip { Swatch = InfoRgb(), Margin = new Padding(0, 0, 10, 0) };
-
-        var hex = new Label
-        {
-            AutoSize = true,
-            Text = _config.Info.Color.ToUpperInvariant(),
-            ForeColor = Theme.Colors.Subtle,
-            Margin = new Padding(0, 5, 0, 0),
-            Font = new Font("Consolas", 9f),
-            BackColor = Theme.Colors.Card,
-        };
-
-        button.Click += (_, _) =>
-        {
-            if (PickColor(InfoColor(), allowAlpha: true) is not { } picked) return;
-            SetInfoColor(picked, picked.A);
-            button.Swatch = Color.FromArgb(picked.R, picked.G, picked.B);
-            hex.Text = _config.Info.Color.ToUpperInvariant();
-            ApplyInfo();
-        };
-
-        var row = new FlowLayoutPanel
-        {
-            FlowDirection = FlowDirection.LeftToRight,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            BackColor = Theme.Colors.Card,
-            Margin = new Padding(0, 2, 0, 2),
-        };
-        row.Controls.Add(button);
-        row.Controls.Add(hex);
-        _infoColorHex = hex;
-        return row;
-    }
-
-    /// <summary>Kept so the opacity spinner can refresh the hex, which carries the alpha byte.</summary>
-    private Label? _infoColorHex;
-
-    /// <summary>The info widget has no preview surface of its own, so unlike ApplyClock this
-    /// only persists and rebuilds — what it looks like is checked on the desktop.</summary>
+    /// <summary>Unlike ApplyClock this only persists and rebuilds — what it looks like is checked on the desktop.</summary>
     private void ApplyInfo()
     {
         if (_loading) return;

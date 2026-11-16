@@ -113,9 +113,11 @@ public static class ThemePreview
 
         if (battery)
         {
-            var hm = Editorial.MeasureInfo(config.Info, [], scale, Editorial.MeasureHalo(halo, SampleBattery, scale));
-            Place(g, hm.Total, Canvas.Width - Margin / 2 - hm.Total.Width, Margin / 2,
-                  bg => Editorial.PaintHalo(bg, hm.HaloBox, halo, SampleBattery, accent), scale);
+            var measured = Editorial.MeasureHalo(halo, SampleBattery, scale);
+            int p = Editorial.ShadowPad(scale);
+            var total = new Size(measured.Width + p * 2, measured.Height + p * 2);
+            Place(g, total, Canvas.Width - Margin / 2 - total.Width, Margin / 2,
+                  bg => Editorial.PaintHalo(bg, new Rectangle(p, p, measured.Width, measured.Height), halo, SampleBattery, accent), scale);
         }
     }
 

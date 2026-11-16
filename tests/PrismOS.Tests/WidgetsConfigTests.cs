@@ -91,22 +91,23 @@ public class GroupThemeConfigTests
         Assert.Null(new WidgetsConfig().Position);
 
     [Fact]
-    public void FreshInstall_GetsOrbit_WithTheInfoWidgetOn()
+    public void FreshInstall_GetsOrbit()
     {
         var path = Path.Combine(Directory.CreateTempSubdirectory("fw-config-").FullName, "config.json");
         var config = ConfigStore.Load(path, out _);
         Assert.Equal(WidgetTheme.Orbit, config.Widgets.ResolveTheme());
-        Assert.True(config.Info.Enabled);
+        Assert.True(config.Info.Disc.Enabled);
+        Assert.True(config.Info.Halo.Enabled);
     }
 
     [Fact]
     public void Upgrade_KeepsClassic()
     {
         var path = Path.Combine(Directory.CreateTempSubdirectory("fw-config-").FullName, "config.json");
-        File.WriteAllText(path, """{ "wallpapers": [], "info": { "enabled": false } }""");
+        File.WriteAllText(path, """{ "wallpapers": [], "info": { "maxCharacters": 30 } }""");
         var config = ConfigStore.Load(path, out _);
         Assert.Equal(WidgetTheme.Classic, config.Widgets.ResolveTheme());
-        Assert.False(config.Info.Enabled);
+        Assert.Equal(30, config.Info.MaxCharacters);
     }
 }
 
@@ -138,7 +139,6 @@ public class UpgradeDetectionTests
         var config = ConfigStore.Load(path, out _, ranBefore: true);
         Assert.False(config.IsFreshInstall);
         Assert.Equal(WidgetTheme.Classic, config.Widgets.ResolveTheme());
-        Assert.False(config.Info.Enabled);
     }
 }
 
@@ -174,7 +174,7 @@ public class StartupConfigTests
         File.WriteAllText(Path.Combine(app, "prismos.log"), "x");
         var second = ConfigStore.LoadAtStartup(config, ConfigStore.RanBefore(app), out _);
         Assert.Equal(WidgetTheme.Orbit, second.Widgets.ResolveTheme());
-        Assert.True(second.Info.Enabled);
+        Assert.True(second.Info.Disc.Enabled);
     }
 
     [Fact]

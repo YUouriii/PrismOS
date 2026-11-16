@@ -257,16 +257,7 @@ The settings panel covers the common cases. Everything lives in
     "marginLeft": null
   },
   "info": {
-    "enabled": false,
-    "anchor": "BottomLeft",
-    "marginX": 48,
-    "marginY": 48,
-    "fontSize": 22,
-    "fontFamily": "Segoe UI",
-    "color": "#C0FFFFFF",
-    "shadow": true,
     "maxCharacters": 48,
-    "sources": ["nowPlaying", "battery"],
 
     "halo": {
       "enabled": true,
@@ -285,7 +276,6 @@ The settings panel covers the common cases. Everything lives in
     "disc": {
       "enabled": true,
       "size": 112,
-      "rotate": true,
       "showProgress": true,
       "accentColor": "#8FB4FF",
       "anchor": "BottomLeft",
@@ -293,7 +283,9 @@ The settings panel covers the common cases. Everything lives in
       "artistFontSize": 14,
       "artistUppercase": true,
       "artistLetterSpacing": 1.4,
-      "artistOpacity": 0.62
+      "artistOpacity": 0.62,
+      "meterSensitivity": 1.0,
+      "onlineArtwork": true
     }
   },
   "pause": { "onFullscreen": true, "onBatterySaver": true, "onRemoteSession": true },

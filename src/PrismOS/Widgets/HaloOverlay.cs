@@ -102,9 +102,9 @@ public sealed class HaloOverlay : IDisposable
             var ring = new Rectangle(Point.Empty, measured);
             if (editorial)
             {
-                var surface = Editorial.MeasureInfo(_config, [], themeScale, measured);
-                ring = surface.HaloBox;
-                measured = surface.Total;
+                int p = Editorial.ShadowPad(themeScale);
+                ring = new Rectangle(p, p, measured.Width, measured.Height);
+                measured = new Size(measured.Width + p * 2, measured.Height + p * 2);
             }
             var size = new SIZE { Cx = measured.Width, Cy = measured.Height };
 

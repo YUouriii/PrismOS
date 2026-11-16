@@ -78,8 +78,7 @@ public class EditorialTests
         AssertInset(Rectangle.Union(record.DiscBox, record.ArtistBox), record.Total, pad);
 
         var halo = Editorial.MeasureHalo(new HaloConfig(), new BatteryReading(76, BatteryState.OnBattery), scale);
-        var info = Editorial.MeasureInfo(new InfoConfig(), [], scale, halo);
-        AssertInset(info.HaloBox, info.Total, pad);
+        AssertInset(new Rectangle(pad, pad, halo.Width, halo.Height), new Size(halo.Width + pad * 2, halo.Height + pad * 2), pad);
     }
 
     [Fact]

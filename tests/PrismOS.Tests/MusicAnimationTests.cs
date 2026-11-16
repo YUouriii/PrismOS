@@ -67,10 +67,10 @@ public class MusicAnimationTests
             panel.Paint(g);
         }
 
-        // The accent-tinted artwork tile is the leftmost red region; the card starts one internal
-        // pad to its left. Its centre must sit on the capsule's centre line with or without a halo.
         // The accent-tinted artwork tile is a solid red block; the date text is red too but only a
-        // few pixels wide per column. Find the first column dense enough to be the artwork.
+        // few pixels wide per column. Find the first column dense enough to be the artwork. The
+        // centre line is only promised when there's a battery balancing the clock — on a desktop
+        // the capsule is compact, so the same assertion would be wrong there.
         int artX = int.MaxValue;
         for (int x = 0; x < bmp.Width && artX == int.MaxValue; x++)
         {
@@ -85,8 +85,19 @@ public class MusicAnimationTests
         var strip = GroupThemes.PaddedStrip(input.Track!.Value, input.Source, input.Scale);
         float cardX = artX - strip.Metrics.Pad;
         float centre = cardX + strip.Metrics.Size.Width / 2f;
-        Assert.True(Math.Abs(centre - panel.Bounds.Width / 2f) <= 4f,
-            $"withBattery={withBattery}: artX={artX} cardX={cardX} cardW={strip.Metrics.Size.Width} centre={centre} panelW={panel.Bounds.Width}");
+        if (withBattery)
+        {
+            // The battery balances the clock, so the strip sits on the capsule's centre line.
+            Assert.True(Math.Abs(centre - panel.Bounds.Width / 2f) <= 4f,
+                $"artX={artX} cardX={cardX} cardW={strip.Metrics.Size.Width} centre={centre} panelW={panel.Bounds.Width}");
+            return;
+        }
+
+        // No battery on a desktop: the capsule is compact — clock, divider, strip — with no
+        // invisible slot reserved for the missing halo.
+        var batteryPanel = GroupThemes.For(WidgetTheme.GlassDock).Layout(Group.Input() with { Accent = Color.Red, Battery = Group.Battery }).Single();
+        Assert.True(panel.Bounds.Width < batteryPanel.Bounds.Width,
+            $"no-battery capsule ({panel.Bounds.Width}px) should be narrower than with battery ({batteryPanel.Bounds.Width}px)");
     }
 
     [Theory]

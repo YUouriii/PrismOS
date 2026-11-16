@@ -31,7 +31,6 @@ public static class Editorial
     private const float PausedFade = 0.55f;
 
     private const float HaloPx = 52f, MinHalo = 12f;
-    private const float InfoPx = 15f, InfoLineGap = 4f, InfoHaloGap = 10f;
 
     private static readonly Color Ink = Color.FromArgb(245, 255, 255, 255);
     private static readonly Color Low = Color.FromArgb(255, 0xFF, 0x4D, 0x4D);
@@ -45,6 +44,9 @@ public static class Editorial
         Math.Max(clock.FontSize / Unit, 0.25f) * (float)Math.Max(dpi, 0.01);
 
     private static int Pad(float scale) => (int)Math.Ceiling(ShadowRecipe.Default.Pad * scale);
+
+    /// <summary>The shadow's pad around a detached surface (the Classic layer bakes it into its own bitmap; Editorial's ring draws its own shadow).</summary>
+    public static int ShadowPad(float scale) => Pad(scale);
     private static int Ceil(float v) => (int)Math.Ceiling(v);
 
     // ---- clock ------------------------------------------------------------------------------
@@ -268,56 +270,5 @@ public static class Editorial
         g.DrawString(number, numberFont, ink, x, cy - ns.Height / 2f, ThemeFonts.Tight);
         using var dim = new SolidBrush(Color.FromArgb(185, 255, 255, 255));
         g.DrawString("%", percentFont, dim, x + ns.Width + kern, cy + ns.Height / 2f - ps.Height, ThemeFonts.Tight);
-    }
-
-    // ---- info lines -------------------------------------------------------------------------
-
-    /// <summary>The lines left over once the record and the ring have taken their sources, with
-    /// the ring always on the left — <c>Halo.Placement</c> is Classic's.</summary>
-    public static InfoRenderer.InfoMetrics MeasureInfo(InfoConfig i, IReadOnlyList<string?> values, float scale, Size halo)
-    {
-        scale = Math.Max(scale, 0.05f);
-        float fontSize = InfoPx * scale;
-        var lines = values.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!).ToList();
-        bool hasHalo = halo.Width > 0 && halo.Height > 0;
-        if (lines.Count == 0 && !hasHalo)
-            return new InfoRenderer.InfoMetrics(lines, Size.Empty, fontSize, Rectangle.Empty, Rectangle.Empty);
-
-        var text = Size.Empty;
-        if (lines.Count > 0)
-        {
-            using var font = ThemeFonts.Create(ThemeFonts.TextSemibold, fontSize);
-            using var g = Graphics.FromHwnd(IntPtr.Zero);
-            float w = 0, hgt = 0;
-            foreach (var line in lines)
-            {
-                var s = g.MeasureString(line, font, PointF.Empty, ThemeFonts.Tight);
-                w = Math.Max(w, s.Width);
-                hgt += s.Height + InfoLineGap * scale;
-            }
-            text = new Size(Ceil(w), Ceil(hgt - InfoLineGap * scale));
-        }
-
-        int pad = Pad(scale);
-        int gap = hasHalo && lines.Count > 0 ? Ceil(InfoHaloGap * scale) : 0;
-        int blockH = Math.Max(text.Height, halo.Height);
-        var haloBox = hasHalo ? new Rectangle(pad, pad + (blockH - halo.Height) / 2, halo.Width, halo.Height) : Rectangle.Empty;
-        var textBox = new Rectangle(pad + halo.Width + gap, pad + (blockH - text.Height) / 2, text.Width, text.Height);
-        var total = new Size(halo.Width + gap + text.Width + pad * 2, blockH + pad * 2);
-        return new InfoRenderer.InfoMetrics(lines, total, fontSize, textBox, haloBox);
-    }
-
-    public static void PaintInfo(Graphics g, in InfoRenderer.InfoMetrics m)
-    {
-        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-        float scale = m.FontSize / InfoPx;
-        using var font = ThemeFonts.Create(ThemeFonts.TextSemibold, m.FontSize);
-        using var brush = new SolidBrush(Color.FromArgb(225, 255, 255, 255));
-        float y = m.TextBox.Y;
-        foreach (var line in m.Lines)
-        {
-            g.DrawString(line, font, brush, m.TextBox.X, y, ThemeFonts.Tight);
-            y += g.MeasureString(line, font, PointF.Empty, ThemeFonts.Tight).Height + InfoLineGap * scale;
-        }
     }
 }

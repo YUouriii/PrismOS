@@ -53,7 +53,6 @@ public static class ConfigStore
     {
         var config = new AppConfig { IsFreshInstall = true };
         config.Widgets.Theme = WidgetsConfig.ConfigName(WidgetTheme.Orbit);
-        config.Info.Enabled = true;
         return config;
     }
 

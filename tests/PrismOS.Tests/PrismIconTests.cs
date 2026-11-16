@@ -119,7 +119,7 @@ public class ResetToDefaultsTests
         var config = new AppConfig();
         config.Clock.FontSize = 42;
         config.Clock.TwentyFourHour = true;
-        config.Info.Enabled = true;
+        config.Info.Disc.OnlineArtwork = false;
         config.Widgets.Theme = "tiles";
         config.Fit = FitMode.Stretch;
         config.MuteVideo = false;
@@ -130,7 +130,7 @@ public class ResetToDefaultsTests
 
         Assert.Equal(110f, config.Clock.FontSize);
         Assert.False(config.Clock.TwentyFourHour);
-        Assert.False(config.Info.Enabled);
+        Assert.True(config.Info.Disc.OnlineArtwork);
         Assert.Equal("classic", config.Widgets.Theme);
         Assert.Equal(FitMode.Fill, config.Fit);
         Assert.True(config.MuteVideo);

@@ -45,7 +45,6 @@ public sealed class Engine : IDisposable
     private PowerNotifications? _power;
     private TrayIcon? _tray;
     private ClockOverlay? _clock;
-    private InfoOverlay? _info;
     private HaloOverlay? _halo;
     private NowPlayingOverlay? _record;
 
@@ -157,7 +156,7 @@ public sealed class Engine : IDisposable
         {
             _config.Assign(monitorDevice, path);
             ConfigStore.Save(_config);
-            if (_clock is null && _info is null && _halo is null && _record is null && _group is null) RecreateWidgets();
+            if (_clock is null && _halo is null && _record is null && _group is null) RecreateWidgets();
             ApplyLockScreenWallpaper();
             WallpaperChanged?.Invoke();
         }
@@ -207,7 +206,6 @@ public sealed class Engine : IDisposable
             if (_playback is { } playback) playback.DisplayOff = off;
             // Dimmed still shows the wallpaper, so only a true off suspends the clock.
             _clock?.SetSuspended(off);
-            _info?.SetSuspended(off);
             _halo?.SetSuspended(off);
             _record?.SetSuspended(off);
             _group?.SetSuspended(off);
@@ -276,10 +274,8 @@ public sealed class Engine : IDisposable
         try
         {
             Log.Info("Re-applying all wallpapers");
-            _clock?.Dispose(); // before the windows — its timer renders into their hosts
+            _clock?.Dispose();
             _clock = null;
-            _info?.Dispose();
-            _info = null;
             _halo?.Dispose();
             _halo = null;
             _record?.Dispose();
@@ -313,18 +309,16 @@ public sealed class Engine : IDisposable
         _group?.Dispose();
         _group = null;
         RecreateClock();
-        RecreateInfo();
+        RecreateHaloAndRecord();
     }
 
-    /// <summary>A group theme replaces the four per-widget overlays with one. The sources are kept
-    /// exactly as the info widget keeps them: created from Info.Sources, disposed only when the
-    /// widget is switched off.</summary>
+    /// <summary>A group theme replaces the per-widget overlays with one. The media and battery
+    /// sources are always created when the pill or the ring can be shown; they outlive switches and
+    /// settings.</summary>
     private void RecreateGroup(WidgetTheme theme)
     {
         _clock?.Dispose();
         _clock = null;
-        _info?.Dispose();
-        _info = null;
         _halo?.Dispose();
         _halo = null;
         _record?.Dispose();
@@ -333,18 +327,10 @@ public sealed class Engine : IDisposable
         _group = null;
         _recordDevice = null;
 
-        // The text lines are gated by Info.Enabled; the record and the battery are not — they
-        // are driven by their own sources and their own toggles, and a user who switches off
-        // the info text in favour of art-only over a wallpaper should keep the record.
-        // A source only exists when it is listed in Info.Sources, so a user can drop the
-        // record by removing "nowPlaying" from the list; battery by removing "battery" or
-        // turning the halo off.
-        bool info = _config.Info.Enabled;
-        bool wantsSources = _config.Info.Sources.Count > 0;
-        if (wantsSources) ResolveSources();
-        else DisposeSources();
+        EnsureSources();
 
-        if (!_config.Clock.Enabled && !info && !wantsSources) return;
+        if (!_config.Clock.Enabled && !_config.Info.Disc.Enabled && !(_config.Info.Halo is { Enabled: true }))
+            return;
 
         var monitors = MonitorTracker.Enumerate();
         var target = monitors.FirstOrDefault(m =>
@@ -355,7 +341,7 @@ public sealed class Engine : IDisposable
         try
         {
             var window = _wallpapers.Windows.GetOrCreate(target);
-            Log.Info($"Widget group: {WidgetsConfig.ConfigName(theme)}, clock={_config.Clock.Enabled}, info={info}, sources=[{string.Join(", ", _config.Info.Sources)}]");
+            Log.Info($"Widget group: {WidgetsConfig.ConfigName(theme)}, clock={_config.Clock.Enabled}, disc={_config.Info.Disc.Enabled}, halo={_config.Info.Halo.Enabled}");
             _group = new GroupOverlay(window.EnsureHost(), GroupThemes.For(theme), _config, target,
                 _nowPlaying, _battery,
                 MonitorTracker.DpiScale(target, monitors), StyleFor(target.Device), MonitorStillPath, ReadBands);
@@ -368,18 +354,10 @@ public sealed class Engine : IDisposable
         }
     }
 
-    /// <summary>Rebuilds the info widget. The sources OUTLIVE it.
-    ///
-    /// They were originally rebuilt with the overlay, on the argument that this path only runs on
-    /// a display change or a settings apply and so is rare. That was wrong about settings: a
-    /// NumericUpDown raises ValueChanged on every increment, so one drag on a spinner rebuilt the
-    /// media-session manager dozens of times and made the widget blink out and back on each one.
-    /// The sources now read their config live and are disposed only when the widget is switched
-    /// off or the engine goes down.</summary>
-    private void RecreateInfo()
+    /// <summary>Classic and Editorial: the clock, the ring, the record. Sources are kept alive for
+    /// as long as the engine runs; the ring and the record honour their own toggles.</summary>
+    private void RecreateHaloAndRecord()
     {
-        _info?.Dispose();
-        _info = null;
         _halo?.Dispose();
         _halo = null;
         _record?.Dispose();
@@ -387,104 +365,53 @@ public sealed class Engine : IDisposable
         _group?.Dispose();
         _group = null;
         _recordDevice = null;
-        Log.Info($"Info widget: enabled={_config.Info.Enabled}, sources=[{string.Join(", ", _config.Info.Sources)}]");
-        // The info text is gated by Info.Enabled; the record and the detached halo are not —
-        // a user who switches the text off in favour of art-only keeps the record, because the
-        // record is its own toggle. A source exists only while it is listed in Info.Sources.
-        if (!_config.Info.Enabled && !_config.Info.Disc.Enabled && !(_config.Info.Halo is { Enabled: true, Detached: true }))
-        {
-            DisposeSources();
-            return;
-        }
+
+        EnsureSources();
+        bool showHalo = _config.Info.Halo is { Enabled: true, Detached: true };
+        bool showRecord = _config.Info.Disc.Enabled;
+        if (!showHalo && !showRecord) return;
 
         var monitors = MonitorTracker.Enumerate();
-        var target = monitors.FirstOrDefault(m =>
-                string.Equals(m.Device, _config.Info.Monitor, StringComparison.OrdinalIgnoreCase))
-            ?? monitors.FirstOrDefault(m => m.Primary) ?? monitors.FirstOrDefault();
+        var target = monitors.FirstOrDefault(m => m.Primary) ?? monitors.FirstOrDefault();
         if (target is null) return;
 
         try
         {
             var window = _wallpapers.Windows.GetOrCreate(target);
-            // ResolveSources first: it is what creates _battery, and the overlay needs it.
-            var sources = ResolveSources();
             double dpi = MonitorTracker.DpiScale(target, monitors);
             var style = StyleFor(target.Device);
-            if (_config.Info.Enabled)
-                _info = new InfoOverlay(window.EnsureHost(), _config.Info, target, sources, _battery, dpi, style);
-
-            // Detached: the halo gets its own overlay instead of being drawn into the info
-            // bitmap. Requires the battery source to exist — no battery in Sources, no ring,
-            // the same rule attached mode follows.
-            if (_config.Info.Halo is { Enabled: true, Detached: true } && _battery is not null)
+            if (showHalo && _battery is not null)
                 _halo = new HaloOverlay(window.EnsureHost(), _config.Info, target, _battery, dpi, style);
 
-            // The record replaces the now-playing text line entirely; it is its own block with its
-            // own anchor, not an item in the list.
-            if (_config.Info.Disc.Enabled && _nowPlaying is not null)
+            // The record is its own block with its own anchor.
+            if (showRecord && _nowPlaying is not null)
             {
                 _record = new NowPlayingOverlay(window.EnsureHost(), _config.Info, target, _nowPlaying, dpi, style,
                     MonitorStillPath, _config.Widgets.Blur, ReadBands);
                 _recordDevice = target.Device;
                 Log.Info($"Record: created (size={_config.Info.Disc.Size})");
             }
-            else
-            {
-                Log.Info($"Record: not created (disc.enabled={_config.Info.Disc.Enabled}, nowPlaying source={_nowPlaying is not null})");
-            }
-            // The character budget may have just changed, and the surviving source is still
-            // holding text formatted to the old one.
             _nowPlaying?.Refresh();
         }
         catch (Exception ex)
         {
-            Log.Error("Info widget failed", ex);
+            Log.Error("Halo/record widgets failed", ex);
         }
     }
 
-    /// <summary>Config source names to sources, in the configured order. An unknown name is
-    /// logged and skipped rather than throwing, so a config written by a later version still
-    /// starts this one.</summary>
+    private void EnsureSources()
+    {
+        _nowPlaying ??= new NowPlayingSource(() => _config.Info.MaxCharacters,
+            RunOnMainThread, () => _config.Info.Disc.OnlineArtwork);
+        if (BatteryAvailable) _battery ??= new BatterySource();
+    }
+
     /// <summary>True when this machine has a battery. Cached: a machine without one today is not
     /// going to grow one between settings panels, and every battery surface hides itself behind
-    /// this — the page in Settings, the rows on the Info page, and the battery source the widgets
-    /// read. The config keeps a desktop's settings untouched.</summary>
+    /// this — the Battery page in Settings and the battery source the widgets read. The config
+    /// keeps a desktop's settings untouched.</summary>
     public bool BatteryAvailable { get; } = BatterySource.IsAvailable();
 
-    private IReadOnlyList<IWidgetSource> ResolveSources()
-    {
-        var ordered = new List<IWidgetSource>();
-        foreach (var name in _config.Info.Sources)
-        {
-            switch (name.Trim().ToLowerInvariant())
-            {
-                case "battery":
-                    if (!BatteryAvailable)
-                    {
-                        Common.Log.Info("Battery source skipped: this machine reports no battery");
-                        break;
-                    }
-                    ordered.Add(_battery ??= new BatterySource());
-                    break;
-                case "nowplaying":
-                    ordered.Add(_nowPlaying ??= new NowPlayingSource(() => _config.Info.MaxCharacters,
-                        RunOnMainThread, () => _config.Info.Disc.OnlineArtwork));
-                    break;
-                default:
-                    Log.Warn($"Unknown info source '{name}' ignored");
-                    break;
-            }
-        }
-        return ordered;
-    }
-
-    private void DisposeSources()
-    {
-        _battery?.Dispose();
-        _battery = null;
-        _nowPlaying?.Dispose();
-        _nowPlaying = null;
-    }
 
     /// <summary>The theme, and the accent of the monitor a widget sits on. Classic is returned
     /// without touching the accent cache, so it never triggers a sample.</summary>
@@ -898,7 +825,7 @@ public sealed class Engine : IDisposable
         sb.AppendLine($"Progman: 0x{layer.Progman:X}  WorkerW: 0x{layer.WorkerW:X}  DefView: 0x{layer.DefView:X}");
         foreach (var monitor in MonitorTracker.Enumerate())
             sb.AppendLine($"Monitor {monitor.Device}: {monitor.Bounds}{(monitor.Primary ? " (primary)" : "")}");
-        sb.AppendLine($"Attached surfaces: {_wallpapers.Windows.Count}   Clock: {(_clock is null ? "off" : "on")}   Info: {(_info is null ? "off" : "on")}   Halo: {(_halo is null ? "attached/off" : "detached")}   Record: {(_record is null ? "off" : "on")}   Group: {(_group is null ? "off" : "on")}");
+        sb.AppendLine($"Attached surfaces: {_wallpapers.Windows.Count}   Clock: {(_clock is null ? "off" : "on")}   Halo: {(_halo is null ? "attached/off" : "detached")}   Record: {(_record is null ? "off" : "on")}   Group: {(_group is null ? "off" : "on")}");
         sb.AppendLine($"Config: {ConfigStore.ConfigPath}");
         sb.AppendLine($"Log: {Path.Combine(Log.Directory, "prismos.log")}");
         return sb.ToString();
@@ -985,7 +912,6 @@ public sealed class Engine : IDisposable
                     // the change that happened while it was off.
                     _engine._battery?.Refresh();
                     _engine._nowPlaying?.Refresh();
-                    _engine._info?.Refresh();
                     _engine._halo?.Refresh();
                     _engine._record?.Refresh();
                     _engine._group?.Refresh();
@@ -1005,8 +931,6 @@ public sealed class Engine : IDisposable
         _playback?.Dispose();
         _clock?.Dispose(); // before the windows — its timer renders into their hosts
         _clock = null;
-        _info?.Dispose();
-        _info = null;
         _halo?.Dispose();
         _halo = null;
         _record?.Dispose();
@@ -1014,7 +938,10 @@ public sealed class Engine : IDisposable
         _group?.Dispose();
         _group = null;
         _recordDevice = null;
-        DisposeSources();
+        _battery?.Dispose();
+        _battery = null;
+        _nowPlaying?.Dispose();
+        _nowPlaying = null;
         _meter.Dispose();
         _wallpapers.Dispose();
         _tray?.Dispose();

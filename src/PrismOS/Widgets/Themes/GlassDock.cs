@@ -84,12 +84,11 @@ public sealed class GlassDock : IGroupTheme
 
         float gap = GroupThemes.U(Gap, s), padY = GroupThemes.U(PadY, s);
 
-        // Keep the music card at the exact centre of the capsule. With no battery (most desktops)
-        // the strip used to end up in the right half; with a wide clock the reverse happened. Pad
-        // the lighter side with an invisible spacer so the strip sits on the centre line regardless
-        // of which widgets are present.
+        // Keep the music card at the exact centre of the capsule when there's a battery to balance
+        // against — a laptop's capsule is symmetric. On a desktop (no battery) the capsule is just
+        // clock, divider, strip; no invisible slot reserved for a battery that isn't there.
         int stripAt = items.FindIndex(it => it.Kind == Kind.Strip);
-        if (stripAt >= 0)
+        if (stripAt >= 0 && battery is not null)
         {
             float before = items.Take(stripAt).Sum(it => it.W) + gap * stripAt;
             float after = items.Skip(stripAt + 1).Sum(it => it.W) + gap * (items.Count - stripAt - 1);
