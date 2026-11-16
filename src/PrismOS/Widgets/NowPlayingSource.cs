@@ -81,6 +81,7 @@ public sealed partial class NowPlayingSource : IWidgetSource
     private long _lastProgressAt;
     private Bitmap? _art;
     private string? _artTrackId;
+    private string _artKey = "";
     private string? _sourceApp;
 
     /// <summary>The media app's AUMID as Windows reports it, e.g. "Spotify.exe" or
@@ -269,6 +270,7 @@ public sealed partial class NowPlayingSource : IWidgetSource
         NowPlayingReading reading = default;
         TimeSpan timelineDuration = default;
         Bitmap? fetchedArt = null;
+        string artKey = "", artSource = "";
         try
         {
             var session = _session;
@@ -287,16 +289,29 @@ public sealed partial class NowPlayingSource : IWidgetSource
 
                 // Fetched once per track, off the render path. The cache key deliberately ignores
                 // playing state, so pausing does not throw the artwork away and refetch it.
-                if (reading.TrackId != _artTrackId)
+                artKey = $"{aumid}|{reading.TrackId}";
+                if (artKey != _artKey)
                 {
                     fetchedArt = await LoadArtAsync(props?.Thumbnail);
+                    artSource = fetchedArt is not null ? "media session" : "";
+
+                    // A browser with no session thumbnail can still have a real cover online. Look
+                    // the track up once by artist and title before settling for the app icon.
+                    if (fetchedArt is null && !string.IsNullOrWhiteSpace(props?.Artist))
+                    {
+                        fetchedArt = await OnlineArt.Find(props.Title, props.Artist);
+                        artSource = fetchedArt is not null ? "online search" : "";
+                    }
+
                     // A browser playing a short video often publishes no Thumbnail at all. Use the
                     // source app's icon rather than leaving a generic note glyph in the art box.
-                    fetchedArt ??= MusicArt.ForSource(aumid, FriendlySourceName(aumid));
+                    if (fetchedArt is null)
+                    {
+                        fetchedArt = MusicArt.ForSource(aumid, FriendlySourceName(aumid));
+                        artSource = "source app";
+                    }
                     if (fetchedArt is not null)
-                        Log.Info(props?.Thumbnail is not null
-                            ? "Now playing: art from the media session"
-                            : "Now playing: art from the source app");
+                        Log.Info($"Now playing: art from the {artSource}");
                 }
             }
         }
@@ -318,11 +333,13 @@ public sealed partial class NowPlayingSource : IWidgetSource
             }
 
             bool trackChanged = reading.TrackId != _artTrackId;
-            if (trackChanged)
+            bool artChanged = artKey.Length > 0 && artKey != _artKey;
+            if (trackChanged || artChanged)
             {
                 _art?.Dispose();
                 _art = fetchedArt;
                 _artTrackId = reading.TrackId;
+                _artKey = artKey;
             }
             else
             {
@@ -354,7 +371,7 @@ public sealed partial class NowPlayingSource : IWidgetSource
             }
             // Otherwise keep the clock we are running: a stale zero from the session is not a seek.
             bool progressStarted = reported > 0.001d && _current.Progress <= 0.001d;
-            if (!trackChanged && next == _value && reading == _current) return;
+            if (!trackChanged && !artChanged && next == _value && reading == _current) return;
             _value = next;
             _current = reading;
             if (progressStarted)
