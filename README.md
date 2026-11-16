@@ -22,9 +22,13 @@ One process. No browser engine, no launcher, no account.
 > is the basis everything here started from; this fork renames the app and works on what comes
 > next. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) and [LICENSE](LICENSE).
 
-![PrismOS on a live wallpaper with the clock, the battery halo and the now-playing record](docs/media/widgets-hero.jpg)
+![PrismOS with a live wallpaper, the clock and the music pill](docs/media/widgets-hero.jpg)
 
-<sub>Wallpaper: <i>Samurai Boss Fight Fantasy Dragon</i>, via <a href="https://moewalls.com/fantasy/samurai-boss-fight-fantasy-dragon-live-wallpaper/">MoeWalls</a>, shown with credit; see <a href="THIRD-PARTY-NOTICES.md#widget-style-samples">THIRD-PARTY-NOTICES.md</a>.</sub>
+<sub>The same renderer as your desktop, over a wallpaper still; the live one plays the video.</sub>
+
+![Live desktop with the music pill, real album art, spectrum bars and track progress](docs/media/widgets-hero2.jpg)
+
+<sub>A real desktop capture while a track is playing. PrismOS draws whatever wallpaper you choose — this one is the user's own video.</sub>
 
 ## Install
 
@@ -43,15 +47,15 @@ unsigned, so SmartScreen will warn: choose More info, then Run anyway.
 <details>
 <summary><b>Or take the ZIP, or build it yourself</b></summary>
 
-**ZIP.** Download `prismos-v0.3.2-win-x64.zip` from the
+**ZIP.** Download `prismos-v0.40.0-win-x64.zip` from the
 [latest release](https://github.com/YUouriii/PrismOS/releases/latest). It unzips to a single
 `prismos.exe`, so there is no installer. The first run adds PrismOS to your Start menu;
-delete that entry and it stays deleted. To uninstall, turn off "Run at startup", quit from the
-tray, then delete the folder and the Start menu entry. Check the download if you like:
+delete that entry and it stays deleted. To uninstall, turn off "Start with Windows", quit the
+app, then delete the folder and the Start menu entry. Check the download if you like:
 
 ```powershell
-Get-FileHash .\prismos-v0.3.2-win-x64.zip -Algorithm SHA256
-# 1ccd202f5358aa5c8175e32225ec18fd7ac5c355d70d4fe0afca1b39239645e6
+Get-FileHash .\prismos-v0.40.0-win-x64.zip -Algorithm SHA256
+# Compare with the .sha256 file next to the download in the release assets.
 ```
 
 The build is framework-dependent, which keeps the release at 7 MB instead of shipping .NET with it.
@@ -114,10 +118,13 @@ or you choose it. Size goes from 50 to 300%.
 <sub>A real screen recording of a 4000x2250 clip. <i>Big Buck Bunny</i>, (c) copyright 2008 Blender Foundation, <a href="https://peach.blender.org">peach.blender.org</a>, <a href="https://creativecommons.org/licenses/by/3.0/">CC BY 3.0</a>.</sub>
 
 **A music pill for whatever you're playing.** Real album art from the Windows media session with the
-source app it came from, a gentle animated equalizer, and the track's progress. Any app with a media
-session counts, browser tabs included. The bars move only while something is actually playing; they
-stop with the desktop covered or the display off. Playback is controlled from the player or its media
-keys — the desktop surface is click-through, so the pill carries no buttons.
+source app it came from, a live 30 fps equalizer driven by the system audio mix, and the track's
+progress. Any app with a media session counts, browser tabs included. When a session publishes no
+cover, PrismOS looks the track up on iTunes' public search API (switchable in Music settings) and
+falls back to the source app's icon. Meter sensitivity is adjustable in the same page. The bars
+move only while something is actually playing; they stop with the desktop covered or the display
+off. Playback is controlled from the player or its media keys — the desktop surface is
+click-through, so the pill carries no buttons.
 
 <div align="center">
 
@@ -143,9 +150,13 @@ charging, a tick when full.
 **Settings that apply while you watch.** The panel's live preview uses the same renderer as your
 desktop, so it can't drift from the real thing.
 
-| Clock | Battery | Music |
+| Clock | Music | Wallpaper |
 |---|---|---|
-| ![Clock settings](docs/media/settings-clock.png) | ![Battery halo settings](docs/media/settings-battery.png) | ![Now-playing record settings](docs/media/settings-music.png) |
+| ![Clock settings](docs/media/settings-clock.png) | ![Music settings](docs/media/settings-music.png) | ![Wallpaper settings](docs/media/settings-wallpaper.png) |
+
+| Style | Behaviour | About |
+|---|---|---|
+| ![Style settings](docs/media/settings-style.png) | ![Behaviour settings](docs/media/settings-behaviour.png) | ![About page](docs/media/settings-about.png) |
 
 **The wallpaper page shows what is actually on your screen.** It previews the wallpaper on the
 display you pick — an image shows itself, a video **plays live and looped inside the panel**, through
@@ -309,7 +320,7 @@ Classic and Editorial keep each widget's own position, monitor and margins. The 
 the whole set from `position` and `monitor`.
 
 - `startMenuShortcutAdded` keeps a deleted Start menu entry deleted. Set it to `false` to get the entry back.
-- `sources` is ordered, and the order is the display order. An unknown name is logged and skipped, so a config from a later version still starts. Long titles are cut at `maxCharacters` rather than scrolled, because scrolling would mean animating.
+- `maxCharacters` cuts long track titles at that many characters rather than scrolling them, because scrolling would mean animating. Long titles in the pill are cut with an ellipsis.
 - `monitor` takes a device name such as `\\.\DISPLAY1`, or `"*"` for all of them.
 - An empty `dateFontFamily` inherits the time's face, and a null `dateColor` inherits its colour dimmed by `dateOpacity`. Each per-edge margin falls back to `marginX` or `marginY` when null.
 - Every default reproduces the v0.1.0 rendering, so upgrading changes nothing until you set one.

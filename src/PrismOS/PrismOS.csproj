@@ -14,7 +14,7 @@
     <ApplicationIcon>prismos.ico</ApplicationIcon>
     <UseWindowsForms>true</UseWindowsForms>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <Version>0.3.2</Version>
+    <Version>0.40.0</Version>
     <Description>A lightweight live-wallpaper engine for Windows.</Description>
   </PropertyGroup>
 

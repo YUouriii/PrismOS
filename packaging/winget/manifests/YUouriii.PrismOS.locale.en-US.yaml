@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.6.0.schema.json
 PackageIdentifier: YUouriii.PrismOS
-PackageVersion: 0.3.2
+PackageVersion: 0.40.0
 PackageLocale: en-US
 Publisher: PrismOS
 PublisherUrl: https://github.com/YUouriii/PrismOS
@@ -31,7 +31,7 @@ Tags:
   - customization
   - windows
   - dotnet
-ReleaseNotesUrl: https://github.com/YUouriii/PrismOS/releases/tag/v0.3.2
+ReleaseNotesUrl: https://github.com/YUouriii/PrismOS/releases/tag/v0.40.0
 Documentations:
   - DocumentLabel: Architecture
     DocumentUrl: https://github.com/YUouriii/PrismOS/blob/main/docs/architecture.md
