@@ -426,7 +426,7 @@ public sealed class Engine : IDisposable
                 _record = new NowPlayingOverlay(window.EnsureHost(), _config.Info, target, _nowPlaying, dpi, style,
                     MonitorStillPath, _config.Widgets.Blur, ReadBands);
                 _recordDevice = target.Device;
-                Log.Info($"Record: created (rotate={_config.Info.Disc.Rotate}, size={_config.Info.Disc.Size})");
+                Log.Info($"Record: created (size={_config.Info.Disc.Size})");
             }
             else
             {

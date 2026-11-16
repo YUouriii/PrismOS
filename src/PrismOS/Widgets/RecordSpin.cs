@@ -25,6 +25,6 @@ public static class RecordSpin
     /// <summary>The record turns only while all of these hold. Any one failing stops it dead
     /// rather than throttling it.</summary>
     public static bool ShouldTurn(bool disposed, bool suspended, bool covered,
-                                  bool rotate, bool playing, bool hasSize) =>
-        !disposed && !suspended && !covered && rotate && playing && hasSize;
+                                  bool playing, bool hasSize) =>
+        !disposed && !suspended && !covered && playing && hasSize;
 }

@@ -171,8 +171,7 @@ public class HaloPresetTests
     }
 }
 
-/// <summary>The record's sizing and defaults. Rotate is the one switch that decides whether this
-/// feature owns a timer at all, so it gets pinned.</summary>
+/// <summary>The record's sizing and defaults.</summary>
 public class DiscConfigTests
 {
     [Fact]
@@ -180,7 +179,6 @@ public class DiscConfigTests
     {
         var d = new AppConfig().Info.Disc;
         Assert.True(d.Enabled);
-        Assert.True(d.Rotate);
         Assert.Equal(112, d.Size);
     }
 

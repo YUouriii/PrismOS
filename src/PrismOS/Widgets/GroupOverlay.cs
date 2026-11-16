@@ -16,8 +16,8 @@ namespace PrismOS.Widgets;
 ///
 /// It replaces the four per-widget overlays while a group theme is active, and keeps their rules:
 /// it repaints only on the clock's tick, a source event or a resume; it goes silent with the
-/// display; and the record turns only while something plays on an uncovered, lit desktop with
-/// Disc.Rotate set — the same <see cref="RecordSpin.ShouldTurn"/> gate.</summary>
+/// display; and the record turns only while something plays on an uncovered, lit desktop — the
+/// same <see cref="RecordSpin.ShouldTurn"/> gate.</summary>
 public sealed class GroupOverlay : IDisposable
 {
     private const string KeyPrefix = "group:";
@@ -313,7 +313,7 @@ public sealed class GroupOverlay : IDisposable
         lock (_sync)
         {
             bool playing = _nowPlaying?.Current.IsPlaying ?? false;
-            bool shouldTurn = RecordSpin.ShouldTurn(_disposed, _suspended, _covered, _config.Info.Disc.Rotate,
+            bool shouldTurn = RecordSpin.ShouldTurn(_disposed, _suspended, _covered,
                                                     playing, (_hasFace && _faceLayer is not null) || _hasStrip);
             if (shouldTurn == _ticking) return;
             _ticking = shouldTurn;
@@ -326,8 +326,8 @@ public sealed class GroupOverlay : IDisposable
 
     // ---- the music meter ---------------------------------------------------------------------
 
-    /// <summary>A clock for the strip that does not depend on Disc.Rotate. Turning the record's
-    /// spin off must not freeze the bars: they follow playback, not the LP animation switch.</summary>
+    /// <summary>A clock for the strip, independent of the record's spin timer. The bars follow
+    /// playback, not the LP animation.</summary>
     private void UpdateMeter()
     {
         lock (_sync)

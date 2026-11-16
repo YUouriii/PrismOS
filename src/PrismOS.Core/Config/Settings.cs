@@ -182,14 +182,13 @@ public sealed class InfoConfig
 }
 
 /// <summary>The now-playing widget: album art, artist and title, a live audio meter and a progress
-/// line — the Classic record is built from the same renderer with Rotate driving its spin.
-/// Rotate is the only thing that starts a timer. Setting it false gives the whole design — art,
-/// progress, the lot — as a still image, and creates no timer at all.</summary>
+/// line — the Classic record is built from the same renderer and turns itself while music plays.
+/// There is no separate switch for the spin: an on-screen record that cannot move is not a
+/// record.</summary>
 public sealed class DiscConfig
 {
     public bool Enabled { get; set; } = true;
     public int Size { get; set; } = 112;
-    public bool Rotate { get; set; } = true;
     public bool ShowProgress { get; set; } = true;
 
     /// <summary>How hard the live meter reacts to the audio, 0.2 (barely a whisper) to 2.5

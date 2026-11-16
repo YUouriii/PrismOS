@@ -16,8 +16,7 @@ namespace PrismOS.Widgets;
 /// like they worked were removed rather than left as decoration.
 ///
 /// The bars repaint on the same 30 fps timer that turns the record, and only while all of these
-/// hold: something is playing, the desktop is visible, the display is on, and Disc.Rotate
-/// (re-purposed as the animation switch) is set.</summary>
+/// hold: something is playing, the desktop is visible and the display is on.</summary>
 public sealed class NowPlayingOverlay : IDisposable
 {
     private const string OverlayKey = "nowplaying";
@@ -120,7 +119,7 @@ public sealed class NowPlayingOverlay : IDisposable
         bool shouldTick;
         lock (_sync)
         {
-            shouldTick = RecordSpin.ShouldTurn(_disposed, _suspended, _covered, _config.Disc.Rotate,
+            shouldTick = RecordSpin.ShouldTurn(_disposed, _suspended, _covered,
                                                _source.Current.IsPlaying, _size.Cx > 0 && _size.Cy > 0);
             if (shouldTick == _ticking) return;
             _ticking = shouldTick;

@@ -31,19 +31,18 @@ public class RecordSpinTests
     public void ShouldTurn_WhenEverythingHolds()
     {
         Assert.True(RecordSpin.ShouldTurn(disposed: false, suspended: false, covered: false,
-                                          rotate: true, playing: true, hasSize: true));
+                                          playing: true, hasSize: true));
     }
 
     [Theory]
-    [InlineData(true, false, false, true, true, true)]   // disposed
-    [InlineData(false, true, false, true, true, true)]   // display off
-    [InlineData(false, false, true, true, true, true)]   // desktop covered
-    [InlineData(false, false, false, false, true, true)] // Rotate off in settings
-    [InlineData(false, false, false, true, false, true)] // paused or stopped
-    [InlineData(false, false, false, true, true, false)] // nothing laid out
+    [InlineData(true, false, false, true, true)]   // disposed
+    [InlineData(false, true, false, true, true)]   // display off
+    [InlineData(false, false, true, true, true)]   // desktop covered
+    [InlineData(false, false, false, false, true)] // paused or stopped
+    [InlineData(false, false, false, true, false)] // nothing laid out
     public void ShouldTurn_AnyConditionFailingStopsIt(bool disposed, bool suspended, bool covered,
-                                                      bool rotate, bool playing, bool hasSize)
+                                                      bool playing, bool hasSize)
     {
-        Assert.False(RecordSpin.ShouldTurn(disposed, suspended, covered, rotate, playing, hasSize));
+        Assert.False(RecordSpin.ShouldTurn(disposed, suspended, covered, playing, hasSize));
     }
 }

@@ -870,8 +870,6 @@ public sealed class SettingsForm : Form
 
     // ---- now-playing record --------------------------------------------------------------
 
-    /// <summary>The record's page. Rotate is the only switch in PrismOS that decides whether a
-    /// timer exists at all, so it says so on the label rather than hiding behind "animate".</summary>
     private Control BuildDiscSection()
     {
         var (card, rows) = NewSection("Now playing");
@@ -879,7 +877,6 @@ public sealed class SettingsForm : Form
 
         rows.AddRow("Show music pill", Check(disc.Enabled, v => { disc.Enabled = v; ApplyInfo(); }));
         rows.AddClassicOnly("Size", Spinner(40, 400, disc.Size, v => { disc.Size = v; ApplyInfo(); }, "px"));
-        rows.AddClassicOnly("Spin while playing", Check(disc.Rotate, v => { disc.Rotate = v; ApplyInfo(); }));
         rows.AddRow("Show progress", Check(disc.ShowProgress, v => { disc.ShowProgress = v; ApplyInfo(); }));
         rows.AddRow("Meter sensitivity", Spinner(20, 250, (int)Math.Round(disc.MeterSensitivity * 100),
             v => { disc.MeterSensitivity = v / 100f; _engine.SaveConfig(); }, "%"));
