@@ -18,13 +18,11 @@ namespace PrismOS;
 /// clock widget, pause monitor, tray UI, config persistence.</summary>
 public sealed class Engine : IDisposable
 {
-    private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
-        { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff" };
-
     private readonly AppConfig _config;
     private readonly DesktopLayerHost _host = new();
     private readonly GalleryService _gallery = new();
-    private readonly Dictionary<string, WallpaperWindow> _windows = new(StringComparer.OrdinalIgnoreCase);
+    private readonly WallpaperService _wallpapers;
+    private readonly LockScreenService _lockScreen;
     private readonly ConcurrentQueue<Action> _mainThreadActions = new();
     private readonly DeviceLossGuard _deviceLoss = new();
 
@@ -62,8 +60,6 @@ public sealed class Engine : IDisposable
     private NowPlayingSource? _nowPlaying;
     private PlaybackMonitor? _playback;
     private bool _reapplying;
-    private bool _lockScreenHintShown;
-    private string _originalWallpaper = "";
 
     /// <summary>True when config.json existed but could not be read: the defaults in use are not
     /// the user's settings, and nothing may save over the file on start-up's account.</summary>
@@ -73,6 +69,18 @@ public sealed class Engine : IDisposable
     {
         _config = config;
         _configUnreadable = configUnreadable;
+
+        // The wallpaper side owns windows, renderers and the captured stills; the shell keeps the
+        // widgets, the tray and everything that decides what a still means.
+        _wallpapers = new WallpaperService(config, _host, RunOnMainThread,
+            (title, text) => _tray?.ShowBalloon(title, text));
+        _wallpapers.DeviceLost += OnDeviceLost;
+        _wallpapers.PlaybackFailed += OnPlaybackFailed;
+        _wallpapers.StaticFrameCaptured += OnStaticFrameCaptured;
+        _wallpapers.InvalidatePause = () => _playback?.Invalidate();
+
+        _lockScreen = new LockScreenService(config, MonitorStillPath, RunOnMainThread,
+            (title, text, onClick) => _tray?.ShowBalloon(title, text, onClick));
     }
 
     public void Start()
@@ -81,7 +89,7 @@ public sealed class Engine : IDisposable
         WtsApi32.WTSRegisterSessionNotification(_messageWindow.Hwnd, WtsApi32.NOTIFY_FOR_THIS_SESSION);
         _power = new PowerNotifications(_messageWindow.Hwnd);
 
-        SaveOriginalWallpaper();
+        _wallpapers.SaveOriginalWallpaper();
 
         // An explorer restart or display change rebuilds the layer for reasons unrelated to the
         // GPU, and produces a fresh device anyway — so it clears any device-loss failure history.
@@ -104,7 +112,7 @@ public sealed class Engine : IDisposable
             Log.Info("Showing the new widget styles notice");
             _tray.ShowBalloon(UpgradeNotice.Title, UpgradeNotice.Text, OpenSettings);
         }
-        else if (_windows.Count == 0)
+        else if (_wallpapers.Windows.Count == 0)
         {
             _tray.ShowBalloon("PrismOS is running", "Right-click the tray icon to choose a wallpaper.");
         }
@@ -114,112 +122,37 @@ public sealed class Engine : IDisposable
 
     private void ApplyFromConfig()
     {
-        foreach (var monitor in MonitorTracker.Enumerate())
-        {
-            var path = _config.WallpaperFor(monitor.Device);
-            if (path is null) continue;
-            if (!File.Exists(path))
-            {
-                Log.Warn($"Configured wallpaper missing: {path}");
-                continue;
-            }
-            try
-            {
-                ApplyToMonitor(monitor, path);
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"Failed to apply wallpaper on {monitor.Device}", ex);
-            }
-        }
+        _wallpapers.ApplyFromConfig();
         RecreateWidgets();
         ApplyLockScreenWallpaper();
     }
 
-    private void ApplyToMonitor(MonitorInfo monitor, string path)
+    /// <summary>A monitor's still frame is on disk and already pointed at by the OS wallpaper.
+    /// What else that means is presentation: the lock screen follows the primary's frame, the
+    /// accent cache re-samples it, and a widget whose accent changed is rebuilt.</summary>
+    private void OnStaticFrameCaptured(MonitorInfo monitor, string wallpaperPath)
     {
-        // Reuse the existing window + composition host when we have one: no re-attach,
-        // no flash of the shell wallpaper, and the clock overlay never blinks.
-        if (!_windows.TryGetValue(monitor.Device, out var window))
-        {
-            window = new WallpaperWindow(monitor);
-            window.DeviceLost += OnDeviceLost;
-            _host.Attach(window.Hwnd, monitor.Bounds);
-            window.EnsureHost();
-            _windows[monitor.Device] = window;
-        }
-        var host = window.EnsureHost();
-
-        // When the first frame is captured, set it as the OS static wallpaper so a
-        // virtual-desktop switch (or Task View) paints a matching frame instead of the
-        // previous wallpaper — no flash before our live layer returns.
         var staticPath = WallpaperFiles.StaticPath(monitor.Device);
-        var captured = monitor;
-        Action onStatic = () => RunOnMainThread(() =>
+        if (monitor.Primary)
         {
-            try { DesktopWallpaper.SetForMonitor(captured.Device, captured.Bounds, staticPath); }
-            catch (Exception ex) { Log.Error("Set static fallback failed", ex); }
-
-            // Point every virtual desktop at this frame so switching desktops paints a
-            // matching wallpaper during the slide animation instead of each desktop's own.
-            if (captured.Primary)
-            {
-                try { VirtualDesktopWallpaper.SetAll(staticPath); }
-                catch (Exception ex) { Log.Error("Set per-desktop fallback failed", ex); }
-                // The frame is fresh — push it to the lock screen policy key too; ApplyFromConfig
-                // called before the frame existed produced no usable source, so it did nothing.
-                try { ApplyLockScreenWallpaper(); } catch (Exception ex) { Log.Warn($"Lock screen update after frame capture failed: {ex.Message}"); }
-            }
-
-            // Rebuilt only when this monitor's accent actually changed: a re-apply of the same
-            // wallpaper is answered from the cache and costs nothing.
-            bool usesAccent = _config.Widgets.ResolveTheme() != WidgetTheme.Classic;
-            if (_accents.OnStaticFrame(captured.Device, path, staticPath, usesAccent))
-            {
-                if (WidgetStyles.ShouldRebuild(_stylesInUse, captured.Device, StyleFor(captured.Device, record: false)))
-                    RecreateWidgets();
-                AccentChanged?.Invoke();
-            }
-        });
-
-        IWallpaperRenderer renderer;
-        if (ImageExtensions.Contains(Path.GetExtension(path)))
-        {
-            renderer = new ImageRenderer(host, monitor.Bounds.Width, monitor.Bounds.Height, _config.Fit, staticPath, onStatic);
+            try { ApplyLockScreenWallpaper(); }
+            catch (Exception ex) { Log.Warn($"Lock screen update after frame capture failed: {ex.Message}"); }
         }
-        else
-        {
-            var video = new VideoRenderer(host, monitor.Bounds.Width, monitor.Bounds.Height, _config.Fit,
-                _config.MuteVideo, _config.Volume, staticPath, onStatic);
-            video.PlaybackFailed += OnPlaybackFailed;
-            renderer = video;
-        }
-        window.SetRenderer(renderer);
-        renderer.Load(path);
 
-        _playback?.Invalidate(); // re-evaluate pause state for the fresh renderer
-        Log.Info($"Wallpaper applied on {monitor.Device}: {path}");
+        // Rebuilt only when this monitor's accent actually changed: a re-apply of the same
+        // wallpaper is answered from the cache and costs nothing.
+        bool usesAccent = _config.Widgets.ResolveTheme() != WidgetTheme.Classic;
+        if (_accents.OnStaticFrame(monitor.Device, wallpaperPath, staticPath, usesAccent))
+        {
+            if (WidgetStyles.ShouldRebuild(_stylesInUse, monitor.Device, StyleFor(monitor.Device, record: false)))
+                RecreateWidgets();
+            AccentChanged?.Invoke();
+        }
     }
 
     public void ApplyUserSelection(string path, string monitorDevice = "*")
     {
-        bool anyApplied = false;
-        foreach (var monitor in MonitorTracker.Enumerate())
-        {
-            if (monitorDevice != "*" && !string.Equals(monitor.Device, monitorDevice, StringComparison.OrdinalIgnoreCase))
-                continue;
-            try
-            {
-                ApplyToMonitor(monitor, path);
-                anyApplied = true;
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"Failed to apply {path} on {monitor.Device}", ex);
-                _tray?.ShowBalloon("Couldn't set wallpaper", $"{Path.GetFileName(path)}: {ex.Message}");
-            }
-        }
-        if (anyApplied)
+        if (_wallpapers.ApplyToSelection(path, monitorDevice))
         {
             _config.Assign(monitorDevice, path);
             ConfigStore.Save(_config);
@@ -353,9 +286,7 @@ public sealed class Engine : IDisposable
             _group?.Dispose();
             _group = null;
             _recordDevice = null;
-            foreach (var window in _windows.Values) window.Dispose();
-            _windows.Clear();
-            VideoRenderer.ReclaimMediaPipeline(); // disposed players hold their MF threads until collected
+            _wallpapers.Windows.DisposeAll(); // disposed players hold their MF threads until collected
             _host.EnsureLayer();
             ApplyFromConfig();
         }
@@ -422,14 +353,7 @@ public sealed class Engine : IDisposable
 
         try
         {
-            if (!_windows.TryGetValue(target.Device, out var window))
-            {
-                window = new WallpaperWindow(target);
-                window.DeviceLost += OnDeviceLost;
-                _host.Attach(window.Hwnd, target.Bounds);
-                window.EnsureHost();
-                _windows[target.Device] = window;
-            }
+            var window = _wallpapers.Windows.GetOrCreate(target);
             Log.Info($"Widget group: {WidgetsConfig.ConfigName(theme)}, clock={_config.Clock.Enabled}, info={info}, sources=[{string.Join(", ", _config.Info.Sources)}]");
             _group = new GroupOverlay(window.EnsureHost(), GroupThemes.For(theme), _config, target,
                 _nowPlaying, _battery,
@@ -480,14 +404,7 @@ public sealed class Engine : IDisposable
 
         try
         {
-            if (!_windows.TryGetValue(target.Device, out var window))
-            {
-                window = new WallpaperWindow(target);
-                window.DeviceLost += OnDeviceLost;
-                _host.Attach(window.Hwnd, target.Bounds);
-                window.EnsureHost();
-                _windows[target.Device] = window;
-            }
+            var window = _wallpapers.Windows.GetOrCreate(target);
             // ResolveSources first: it is what creates _battery, and the overlay needs it.
             var sources = ResolveSources();
             double dpi = MonitorTracker.DpiScale(target, monitors);
@@ -596,14 +513,7 @@ public sealed class Engine : IDisposable
         {
             // The clock rides the monitor's wallpaper composition tree; without a
             // wallpaper it gets a bare surface window of its own.
-            if (!_windows.TryGetValue(target.Device, out var window))
-            {
-                window = new WallpaperWindow(target);
-                window.DeviceLost += OnDeviceLost;
-                _host.Attach(window.Hwnd, target.Bounds);
-                window.EnsureHost();
-                _windows[target.Device] = window;
-            }
+            var window = _wallpapers.Windows.GetOrCreate(target);
             _clock = new ClockOverlay(window.EnsureHost(), _config.Clock, target,
                 MonitorTracker.DpiScale(target, monitors), StyleFor(target.Device));
         }
@@ -617,10 +527,10 @@ public sealed class Engine : IDisposable
 
     private void OnPauseStateChanged(string monitorDevice, PauseReason reason)
     {
-        // Fires on the monitor's timer thread; _windows belongs to the main thread.
+        // Fires on the monitor's timer thread; the window registry belongs to the main thread.
         RunOnMainThread(() =>
         {
-            if (!_windows.TryGetValue(monitorDevice, out var window) || window.Renderer is null) return;
+            if (!_wallpapers.Windows.TryGet(monitorDevice, out var window) || window.Renderer is null) return;
             if (reason == PauseReason.None)
             {
                 window.Renderer.Resume();
@@ -708,40 +618,6 @@ public sealed class Engine : IDisposable
                 return;
         }
     }
-
-    private void SaveOriginalWallpaper()
-    {
-        try
-        {
-            Directory.CreateDirectory(Log.Directory);
-            if (File.Exists(WallpaperFiles.SavedWallpaper))
-            {
-                // A prior run left this behind (crash / kill) — it holds the TRUE original.
-                _originalWallpaper = File.ReadAllText(WallpaperFiles.SavedWallpaper).Trim();
-            }
-            else
-            {
-                _originalWallpaper = DesktopWallpaper.GetCurrent();
-                File.WriteAllText(WallpaperFiles.SavedWallpaper, _originalWallpaper);
-                Log.Info($"Saved original wallpaper: {(_originalWallpaper.Length == 0 ? "(none)" : _originalWallpaper)}");
-            }
-
-            // Per-desktop wallpapers (Windows 11) — save once so we can restore them.
-            if (!File.Exists(WallpaperFiles.SavedDesktopWallpapers))
-            {
-                var perDesktop = VirtualDesktopWallpaper.ReadAll();
-                File.WriteAllLines(WallpaperFiles.SavedDesktopWallpapers,
-                    perDesktop.Select(kv => $"{kv.Key}\t{kv.Value}"));
-                Log.Info($"Saved {perDesktop.Count} per-desktop wallpaper(s)");
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Warn($"Could not save original wallpaper: {ex.Message}");
-        }
-    }
-
-    private void RestoreOriginalWallpaper() => WallpaperRestore.Restore(_originalWallpaper);
 
     private void SaveAndRefreshWidgets()
     {
@@ -895,7 +771,7 @@ public sealed class Engine : IDisposable
     {
         var path = _config.WallpaperFor(monitor.Device);
         if (path is null) return null;
-        if (ImageExtensions.Contains(Path.GetExtension(path))) return File.Exists(path) ? path : null;
+        if (WallpaperService.IsImage(path)) return File.Exists(path) ? path : null;
         var frame = WallpaperFiles.StaticPath(monitor.Device);
         return File.Exists(frame) ? frame : null;
     }
@@ -903,58 +779,7 @@ public sealed class Engine : IDisposable
     /// <summary>Applies the configured wallpaper to the lock screen as well. The lock screen
     /// shows a static picture; a video wallpaper is swapped for the captured frame.
     /// Off means the checkbox is off, not "leave the old one alone" — we simply never write the key.</summary>
-    public void ApplyLockScreenWallpaper()
-    {
-        if (!_config.Widgets.LockScreen) return;
-        try
-        {
-            var monitors = MonitorTracker.Enumerate();
-            var target = monitors.FirstOrDefault(m => m.Primary) ?? monitors.FirstOrDefault();
-            if (target is null) return;
-            var configImage = _config.WallpaperFor(target.Device);
-            if (configImage is null) return;
-
-            string? source = MonitorStillPath(target);
-            if (source is null) { Log.Info("Lock screen unchanged: no usable image captured yet"); return; }
-
-            var result = Desktop.LockScreenWallpaper.Set(source, Desktop.LockScreenWallpaper.AppImagePath);
-            switch (result)
-            {
-                case Desktop.LockScreenWallpaper.Result.Ok:
-                    Log.Info("Lock screen image updated from configured wallpaper");
-                    break;
-                case Desktop.LockScreenWallpaper.Result.NeedsElevation:
-                    if (!_lockScreenHintShown && _tray is not null)
-                    {
-                        _lockScreenHintShown = true;
-                        _tray.ShowBalloon(
-                            "PrismOS isn't on the lock screen",
-                            "Windows needs admin once to write the lock screen image policy. Click to elevate.",
-                            () => RunOnMainThread(ElevateLockScreenWrite));
-                    }
-                    break;
-                case Desktop.LockScreenWallpaper.Result.Failed:
-                    Log.Warn("Lock screen write failed; image left unchanged");
-                    break;
-            }
-        }
-        catch (Exception ex)
-        {
-            Common.Log.Warn($"Lock screen apply failed: {ex.Message}");
-        }
-    }
-
-    /// <summary>The balloon's click action: re-launch PrismOS elevated just to write the policy
-    /// key, nothing else starts. UAC belongs to us, not to any helper we ship.</summary>
-    private void ElevateLockScreenWrite()
-    {
-        var result = Desktop.LockScreenWallpaper.SetViaElevation(Desktop.LockScreenWallpaper.AppImagePath);
-        Log.Info($"Lock screen elevation result: {result}");
-        if (result == Desktop.LockScreenWallpaper.Result.Ok)
-            _tray?.ShowBalloon("Lock screen updated", "Your wallpaper now shows on the lock screen too.");
-        else
-            _tray?.ShowBalloon("Lock screen kept as is", "Elevation was declined or failed; see the log.");
-    }
+    public void ApplyLockScreenWallpaper() => _lockScreen.Apply();
 
     /// <summary>The monitor to preview, for call sites that want the same device the
     /// wallpaper targets (re-applied on resume).</summary>
@@ -976,30 +801,13 @@ public sealed class Engine : IDisposable
     public void RefreshWallpapers()
     {
         ConfigStore.Save(_config);
-        foreach (var monitor in MonitorTracker.Enumerate())
-        {
-            var path = _config.WallpaperFor(monitor.Device);
-            if (path is null || !File.Exists(path)) continue;
-            try
-            {
-                ApplyToMonitor(monitor, path);
-            }
-            catch (Exception ex)
-            {
-                Log.Error($"Refresh failed on {monitor.Device}", ex);
-            }
-        }
+        _wallpapers.Refresh();
     }
 
     public void ApplyAudioSettings()
     {
         ConfigStore.Save(_config);
-        foreach (var window in _windows.Values)
-            if (window.Renderer is VideoRenderer video)
-            {
-                video.IsMuted = _config.MuteVideo;
-                video.Volume = _config.Volume;
-            }
+        _wallpapers.ApplyAudioSettings();
     }
 
     private Tray.SettingsForm? _settingsForm;
@@ -1067,7 +875,7 @@ public sealed class Engine : IDisposable
         sb.AppendLine($"Progman: 0x{layer.Progman:X}  WorkerW: 0x{layer.WorkerW:X}  DefView: 0x{layer.DefView:X}");
         foreach (var monitor in MonitorTracker.Enumerate())
             sb.AppendLine($"Monitor {monitor.Device}: {monitor.Bounds}{(monitor.Primary ? " (primary)" : "")}");
-        sb.AppendLine($"Attached surfaces: {_windows.Count}   Clock: {(_clock is null ? "off" : "on")}   Info: {(_info is null ? "off" : "on")}   Halo: {(_halo is null ? "attached/off" : "detached")}   Record: {(_record is null ? "off" : "on")}   Group: {(_group is null ? "off" : "on")}");
+        sb.AppendLine($"Attached surfaces: {_wallpapers.Windows.Count}   Clock: {(_clock is null ? "off" : "on")}   Info: {(_info is null ? "off" : "on")}   Halo: {(_halo is null ? "attached/off" : "detached")}   Record: {(_record is null ? "off" : "on")}   Group: {(_group is null ? "off" : "on")}");
         sb.AppendLine($"Config: {ConfigStore.ConfigPath}");
         sb.AppendLine($"Log: {Path.Combine(Log.Directory, "prismos.log")}");
         return sb.ToString();
@@ -1141,9 +949,9 @@ public sealed class Engine : IDisposable
                     if (_engine._config.Widgets.WakeTransition)
                     {
                         if ((int)wParam == WTS_SESSION_LOCK)
-                            foreach (var window in _engine._windows.Values) window.Renderer?.FreezeFrameAtZero();
+                            _engine._wallpapers.FreezeAll();
                         else if ((int)wParam == WTS_SESSION_UNLOCK)
-                            foreach (var window in _engine._windows.Values) window.Renderer?.WakeTransition();
+                            _engine._wallpapers.WakeAll();
                     }
                     return IntPtr.Zero;
                 case WM_POWERBROADCAST when (int)wParam == PBT_APMRESUMEAUTOMATIC:
@@ -1170,7 +978,7 @@ public sealed class Engine : IDisposable
 
     public void Dispose()
     {
-        RestoreOriginalWallpaper();
+        _wallpapers.RestoreOriginalWallpaper();
         _playback?.Dispose();
         _clock?.Dispose(); // before the windows — its timer renders into their hosts
         _clock = null;
@@ -1185,8 +993,7 @@ public sealed class Engine : IDisposable
         _recordDevice = null;
         DisposeSources();
         _meter.Dispose();
-        foreach (var window in _windows.Values) window.Dispose();
-        _windows.Clear();
+        _wallpapers.Dispose();
         _tray?.Dispose();
         _power?.Dispose(); // before the window — the handles are registered against its hwnd
         _power = null;
