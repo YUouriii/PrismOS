@@ -45,6 +45,7 @@ public sealed class GroupOverlay : IDisposable
     private readonly WidgetStyle _style;
     private readonly Timer _clockTimer;
     private readonly Timer _spinTimer;
+    private readonly Timer _meterTimer;
     private readonly Lock _sync = new();
     private readonly Dictionary<string, PanelLayers> _panels = [];
 
@@ -59,6 +60,7 @@ public sealed class GroupOverlay : IDisposable
     private CompositionSurface? _faceLayer;
     private float _turns;
     private bool _ticking;
+    private bool _meterTicking;
     private bool _hasFace;
     private bool _hasStrip;
 
@@ -78,6 +80,7 @@ public sealed class GroupOverlay : IDisposable
         _style = style;
         _clockTimer = new Timer(_ => Tick(), null, Timeout.Infinite, Timeout.Infinite);
         _spinTimer = new Timer(_ => SpinTick(), null, Timeout.Infinite, Timeout.Infinite);
+        _meterTimer = new Timer(_ => MeterTick(), null, Timeout.Infinite, Timeout.Infinite);
 
         if (_nowPlaying is not null) _nowPlaying.Changed += OnSourceChanged;
         if (_battery is not null) _battery.Changed += OnSourceChanged;
@@ -97,6 +100,7 @@ public sealed class GroupOverlay : IDisposable
     {
         Render();
         UpdateSpin();
+        UpdateMeter();
         Arm();
     }
 
@@ -106,6 +110,7 @@ public sealed class GroupOverlay : IDisposable
         {
             Render();
             UpdateSpin();
+            UpdateMeter();
         }
         catch (Exception ex)
         {
@@ -123,6 +128,7 @@ public sealed class GroupOverlay : IDisposable
                 try { _clockTimer.Change(Timeout.Infinite, Timeout.Infinite); } catch (ObjectDisposedException) { }
         }
         UpdateSpin();
+        UpdateMeter();
         if (!suspended) Refresh();
     }
 
@@ -134,6 +140,7 @@ public sealed class GroupOverlay : IDisposable
             _covered = covered;
         }
         UpdateSpin();
+        UpdateMeter();
     }
 
     // ---- the clock's tick ---------------------------------------------------------------------
@@ -152,7 +159,7 @@ public sealed class GroupOverlay : IDisposable
     {
         // UpdateSpin as well: a tick can rebuild a panel (a new size), which drops the spin, and
         // nothing else would start it again until the next track or cover change.
-        try { Render(); UpdateSpin(); }
+        try { Render(); UpdateSpin(); UpdateMeter(); }
         catch (Exception ex) { Log.Error("Group widget tick failed", ex); }
         finally { Arm(); }
     }
@@ -317,6 +324,43 @@ public sealed class GroupOverlay : IDisposable
         }
     }
 
+    // ---- the music meter ---------------------------------------------------------------------
+
+    /// <summary>A clock for the strip that does not depend on Disc.Rotate. Turning the record's
+    /// spin off must not freeze the bars: they follow playback, not the LP animation switch.</summary>
+    private void UpdateMeter()
+    {
+        lock (_sync)
+        {
+            bool playing = _nowPlaying?.Current.IsPlaying ?? false;
+            bool shouldRun = !_disposed && !_suspended && !_covered && _hasStrip && playing;
+            if (shouldRun == _meterTicking) return;
+            _meterTicking = shouldRun;
+            Log.Info(shouldRun ? "Group: meter running"
+                : $"Group: meter stopped (suspended={_suspended}, covered={_covered}, playing={playing}, strip={_hasStrip})");
+
+            try { _meterTimer.Change(shouldRun ? 0 : Timeout.Infinite, shouldRun ? 1000 / RecordSpin.TimerFramesPerSecond : Timeout.Infinite); }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
+    private void MeterTick()
+    {
+        try
+        {
+            lock (_sync)
+            {
+                if (_disposed || !_meterTicking) return;
+                // Render() takes the same lock recursively; unchanged panels are not re-presented.
+                Render();
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("Group meter tick failed", ex);
+        }
+    }
+
     private void SpinTick()
     {
         try
@@ -324,8 +368,6 @@ public sealed class GroupOverlay : IDisposable
             lock (_sync)
             {
                 if (_disposed || !_ticking) return;
-                // Render() takes the same lock recursively; unchanged panels are not re-shadowed.
-                if (_hasStrip) Render();
                 if (_faceLayer is not null)
                 {
                     _turns = (_turns + RecordSpin.DegreesPerSecond / 360f / RecordSpin.TimerFramesPerSecond) % 1f;
@@ -349,6 +391,7 @@ public sealed class GroupOverlay : IDisposable
             if (_battery is not null) _battery.Changed -= OnSourceChanged;
             _clockTimer.Dispose();
             _spinTimer.Dispose();
+            _meterTimer.Dispose();
             DropFace();
             foreach (var key in _panels.Keys.ToList()) DropPanel(key);
             _face?.Dispose();

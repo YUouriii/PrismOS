@@ -263,8 +263,8 @@ public static class MusicStrip
         for (int i = 0; i < bars; i++)
         {
             float band = amp * (0.60f
-                + 0.24f * MathF.Sin(phase * 2.6f + i * 0.62f)
-                + 0.16f * MathF.Sin(phase * 1.4f + i * 1.37f));
+                + 0.26f * MathF.Sin(phase * 3.6f + i * 0.62f)
+                + 0.16f * MathF.Sin(phase * 2.1f + i * 1.37f));
             float mag = Math.Clamp(band, 0.08f, 1f);
             float h = box.Height * Math.Max(mag, 0.08f);
             brush.Color = Color.FromArgb((int)(135 + 120 * Math.Min(1f, mag)), 255, 255, 255);
