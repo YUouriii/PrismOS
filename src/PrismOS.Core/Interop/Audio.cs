@@ -14,6 +14,7 @@ internal static class AudioInterop
     // Audio device roles / flows
     internal const int eRender = 0;
     internal const int eConsole = 0;
+    internal const int DEVICE_STATE_ACTIVE = 0x1;
 
     // Audio share mode
     internal const int AudioClientShareModeShared = 0;
@@ -42,7 +43,7 @@ internal static class AudioInterop
      InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     internal interface IMMDeviceEnumerator
     {
-        void EnumAudioEndpoints(int dataFlow, int dwStateMask, out IMMDeviceCollection ppDevices);
+        [PreserveSig] int EnumAudioEndpoints(int dataFlow, int dwStateMask, out IMMDeviceCollection ppDevices);
         [PreserveSig] int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice ppEndpoint);
     }
 
@@ -88,11 +89,13 @@ internal static class AudioInterop
      InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     internal interface IAudioCaptureClient
     {
-        [PreserveSig] int GetBufferSize(out uint pNumBufferFrames);
-        [PreserveSig] int GetNextPacketSize(out uint pNumFramesInNextPacket);
+        // The order is the vtable order from audioclient.idl: GetBuffer, ReleaseBuffer,
+        // GetNextPacketSize. A wrong order here turns GetNextPacketSize into ReleaseBuffer and
+        // returns AUDCLNT_E_OUT_OF_ORDER forever, so no packet is ever read.
         [PreserveSig] int GetBuffer(out IntPtr ppData, out uint pNumFramesToRead, out uint pdwFlags,
             out ulong pu64DevicePosition, out ulong pu64QPCPosition);
         [PreserveSig] int ReleaseBuffer(uint numFramesRead);
+        [PreserveSig] int GetNextPacketSize(out uint pNumFramesInNextPacket);
     }
 
     [StructLayout(LayoutKind.Sequential, Pack = 1)]

@@ -1,4 +1,5 @@
 using System.Drawing;
+using Timer = System.Threading.Timer;
 using PrismOS.Common;
 using Windows.Foundation;
 using Windows.Media.Control;
@@ -67,6 +68,7 @@ public sealed partial class NowPlayingSource : IWidgetSource
 
     private readonly Func<int> _maxCharacters;
     private readonly Action<Action> _toMainThread;
+    private Timer? _poll;
     private TypedEventHandler<GlobalSystemMediaTransportControlsSessionManager, CurrentSessionChangedEventArgs>? _onSessionChanged;
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private GlobalSystemMediaTransportControlsSession? _session;
@@ -182,6 +184,11 @@ public sealed partial class NowPlayingSource : IWidgetSource
                 _manager = manager;
                 _onSessionChanged = (_, _) => _toMainThread(AttachSession);
                 _manager.CurrentSessionChanged += _onSessionChanged;
+
+                // TimelinePropertiesChanged is not a metronome: many players raise it only at
+                // track boundaries, so the progress line would sit still for a whole song. Poll
+                // the session as well; RefreshAsync ignores readings that did not change.
+                _poll = new Timer(_ => Poll(), null, 1500, 1500);
             }
             _toMainThread(AttachSession);
         }
@@ -213,6 +220,16 @@ public sealed partial class NowPlayingSource : IWidgetSource
         }
 
         _ = RefreshAsync();
+    }
+
+    private void Poll()
+    {
+        if (_disposed || _session is null) return;
+        _toMainThread(() =>
+        {
+            if (_disposed || _session is null) return;
+            _ = RefreshAsync();
+        });
     }
 
     private void OnMediaChanged(GlobalSystemMediaTransportControlsSession s, MediaPropertiesChangedEventArgs e) => _ = RefreshAsync();
@@ -281,9 +298,11 @@ public sealed partial class NowPlayingSource : IWidgetSource
 
             // Compare the reading as well as the text: the record redraws when the artwork or the
             // playing state moves, neither of which necessarily changes a single character.
+            bool progressStarted = reading.Progress > 0.001d && _current.Progress <= 0.001d;
             if (!trackChanged && next == _value && reading == _current) return;
             _value = next;
             _current = reading;
+            if (progressStarted) Log.Info($"Now playing: progress {reading.Progress:0.00}");
             Changed?.Invoke();
         });
     }
@@ -328,6 +347,8 @@ public sealed partial class NowPlayingSource : IWidgetSource
                 _onSessionChanged = null;
             }
             _manager = null;
+            _poll?.Dispose();
+            _poll = null;
         }
 
         _art?.Dispose();

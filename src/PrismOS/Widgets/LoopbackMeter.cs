@@ -4,20 +4,21 @@ using PrismOS.Interop;
 
 namespace PrismOS.Widgets;
 
-/// <summary>A system-audio meter listening on the default render endpoint's loopback.
-/// Reads the mix that goes to the speakers from a background thread and keeps the last
-/// smoothed 12-band spectrum in an array the widgets read each frame.
+/// <summary>A live spectrum meter over WASAPI loopback capture. It listens on every active render
+/// endpoint and publishes the bands of whichever endpoint is actually producing audio — on a
+/// machine with speakers, a headset, an HDMI output and a virtual cable, the system default is
+/// often a device nothing is playing through, and listening only there leaves the meter dead.
 ///
-/// Life cycle: constructed once, started at engine start, stopped at shutdown (COM must
-/// be released from the same thread that created it). No per-frame allocations on the
-/// hot path.</summary>
+/// Life cycle: constructed once, started at engine start, stopped at shutdown (COM must be
+/// released from the same thread that created it). No per-frame allocations on the hot path.</summary>
 public sealed class LoopbackMeter : IDisposable
 {
     /// <summary>The COM class of the endpoint enumerator. This is <c>CLSID_MMDeviceEnumerator</c>
-    /// (BCDE0395…); A95664D5… is its interface IID, <c>IID_IMMDeviceEnumerator</c>, and asking the
-    /// class factory for that fails with REGDB_E_CLASSNOTREG on every machine — which is how the
-    /// meter ended up silently dead while the code looked plausible.</summary>
+    /// (BCDE0395…); A95664D5… is its interface IID, and asking the class factory for that fails
+    /// with REGDB_E_CLASSNOTREG on every machine.</summary>
     public static readonly Guid EnumeratorClsid = new("bcde0395-e52f-467c-8e3d-c4579291692e");
+
+    private const int DeviceInvalidated = unchecked((int)0x88890004);
 
     private sealed class Run : IDisposable
     {
@@ -31,6 +32,75 @@ public sealed class LoopbackMeter : IDisposable
             if (Thread is null) return;
             Stop = true;
             if (Thread.Join(3000)) Done.Set();
+        }
+    }
+
+    /// <summary>One endpoint's capture stream and its own FFT state.</summary>
+    private sealed class Capture : IDisposable
+    {
+        public required string Id;
+        public required AudioInterop.IAudioClient Client;
+        public required AudioInterop.IAudioCaptureClient Source;
+        public required AudioInterop.WAVEFORMATEX Format;
+        public readonly float[] Bands = new float[Spectrum.BandCount];
+        public bool Invalid;
+
+        private readonly float[] _ring = new float[Spectrum.FftSize * 4];
+        private readonly float[] _window = new float[Spectrum.FftSize];
+        private int _head, _count;
+
+        public bool Pump(LoopbackMeter owner)
+        {
+            uint packetSize;
+            int hr = Source.GetNextPacketSize(out packetSize);
+            if (hr == DeviceInvalidated) { Invalid = true; return false; }
+            if (hr != 0 || packetSize == 0) return false;
+
+            Interlocked.Increment(ref owner._packets);
+            while (packetSize > 0)
+            {
+                hr = Source.GetBuffer(out IntPtr data, out uint frames, out uint flags, out _, out _);
+                if (hr == DeviceInvalidated) { Invalid = true; break; }
+                if (hr != 0) break;
+
+                if (data != IntPtr.Zero && frames > 0 && (flags & AudioInterop.BufferFlagsSilent) == 0)
+                {
+                    Interlocked.Add(ref owner._frames, frames);
+                    int channels = Format.Channels > 0 ? Format.Channels : 1;
+                    int floats = (int)frames * channels;
+                    unsafe
+                    {
+                        var frame = new ReadOnlySpan<float>((float*)data, floats);
+                        for (int f = 0; f < frame.Length; f += channels)
+                        {
+                            float mono = 0f;
+                            for (int c = 0; c < channels; c++) mono += frame[f + c];
+                            _ring[_head] = mono / channels;
+                            _head = (_head + 1) % _ring.Length;
+                            if (_count < _ring.Length) _count++;
+                        }
+                    }
+                }
+                Source.ReleaseBuffer(frames);
+                if (Source.GetNextPacketSize(out packetSize) != 0) break;
+            }
+
+            float rate = Format.SamplesPerSec >= 8000 ? Format.SamplesPerSec : 48000f;
+            while (_count >= Spectrum.FftSize)
+            {
+                int start = (_head - _count + _ring.Length) % _ring.Length;
+                for (int i = 0; i < Spectrum.FftSize; i++)
+                    _window[i] = _ring[(start + i) % _ring.Length];
+                _count -= Spectrum.FftSize / 2;
+                Interlocked.Increment(ref owner._windows);
+                Spectrum.Magnitudes(_window, rate, Bands, sensitivity: 1.0f);
+            }
+            return true;
+        }
+
+        public void Dispose()
+        {
+            try { Client.Stop(); } catch { }
         }
     }
 
@@ -58,8 +128,7 @@ public sealed class LoopbackMeter : IDisposable
             Array.Copy(_bands, into, into.Length);
     }
 
-    /// <summary>True when recent audio is above silence threshold — used to dim bars or
-    /// hide them when nothing is playing.</summary>
+    /// <summary>True when recent audio crossed the meter's floor.</summary>
     public bool IsAudible
     {
         get
@@ -103,54 +172,50 @@ public sealed class LoopbackMeter : IDisposable
             var enumType = Type.GetTypeFromCLSID(EnumeratorClsid);
             if (enumType is null) { Log.Warn("Audio meter: CLSID mismatch"); return; }
             var enumerator = (AudioInterop.IMMDeviceEnumerator)Activator.CreateInstance(enumType)!;
-            int hrEndpoint = enumerator.GetDefaultAudioEndpoint(AudioInterop.eRender, AudioInterop.eConsole, out AudioInterop.IMMDevice? device);
-            if (hrEndpoint != 0 || device is null)
+
+            var captures = new List<Capture>();
+            if (enumerator.EnumAudioEndpoints(AudioInterop.eRender, AudioInterop.DEVICE_STATE_ACTIVE,
+                                              out AudioInterop.IMMDeviceCollection? collection) == 0
+                && collection is not null)
             {
-                Log.Warn($"Audio meter: no default render endpoint ({hrEndpoint:X8})");
-                return;
+                collection.GetCount(out uint count);
+                for (uint i = 0; i < count; i++)
+                {
+                    if (collection.Item(i, out AudioInterop.IMMDevice? device) != 0 || device is null) continue;
+                    string id = "";
+                    try { device.GetId(out id); } catch { }
+                    var capture = TryOpen(device, id);
+                    if (capture is not null) captures.Add(capture);
+                }
             }
 
-            var activateGuid = AudioInterop.IIDAudioClient;
-            int hrActivate = device.Activate(ref activateGuid, 23 /* CLSCTX_ALL */, IntPtr.Zero, out object? unknown);
-            if (hrActivate != 0 || unknown is not AudioInterop.IAudioClient client)
+            if (captures.Count == 0)
             {
-                Log.Warn($"Audio meter: endpoint Activate failed {hrActivate:X8} ({unknown?.GetType().Name ?? "no object"})");
-                return;
+                // The collection can be empty on a shell that only answers the default-endpoint
+                // query; try that as a last resort.
+                if (enumerator.GetDefaultAudioEndpoint(AudioInterop.eRender, AudioInterop.eConsole,
+                        out AudioInterop.IMMDevice? device) == 0 && device is not null)
+                {
+                    string id = "";
+                    try { device.GetId(out id); } catch { }
+                    var capture = TryOpen(device, id);
+                    if (capture is not null) captures.Add(capture);
+                }
             }
 
-            var fmt = AudioInterop.WAVEFORMATEX.Float48kHzStereo();
-            int hr = client.Initialize(AudioInterop.AudioClientShareModeShared,
-                AudioInterop.StreamFlagsLoopback | AudioInterop.StreamFlagsAutoConvertPcm,
-                200_000, 0, ref fmt, IntPtr.Zero); // 200 ms in 100-ns units
-            if (hr != 0)
+            if (captures.Count == 0)
             {
-                Log.Warn($"Audio meter: Initialize failed {hr:X8}");
-                return;
-            }
-
-            var serviceGuid = AudioInterop.IIDCaptureClient;
-            int hrService = client.GetService(ref serviceGuid, out unknown);
-            if (hrService != 0 || unknown is not AudioInterop.IAudioCaptureClient capture)
-            {
-                Log.Warn($"Audio meter: no IAudioCaptureClient ({hrService:X8})");
-                return;
-            }
-            int hrStart = client.Start();
-            if (hrStart != 0)
-            {
-                Log.Warn($"Audio meter: Start failed {hrStart:X8}");
+                Log.Warn("Audio meter: no usable render endpoint for loopback capture");
                 return;
             }
 
             _available = true;
             run.Started.Set();
-            try
-            {
-                CaptureLoop(run, capture, fmt);
-            }
+            Log.Info($"Audio meter: listening on {captures.Count} endpoint(s): {string.Join(", ", captures.Select(c => c.Id))}");
+            try { PumpLoop(run, captures); }
             finally
             {
-                try { client.Stop(); } catch { }
+                foreach (var capture in captures) capture.Dispose();
                 _available = false;
             }
         }
@@ -165,74 +230,107 @@ public sealed class LoopbackMeter : IDisposable
         }
     }
 
-    private void CaptureLoop(Run run, AudioInterop.IAudioCaptureClient capture, AudioInterop.WAVEFORMATEX fmt)
+    private static Capture? TryOpen(AudioInterop.IMMDevice device, string id)
     {
-        // Ring buffer of mono samples (Hann windowed on demand).
-        int ringCapacity = Spectrum.FftSize * 4;
-        var ring = new float[ringCapacity];
-        int ringHead = 0, ringCount = 0;
+        var iidClient = AudioInterop.IIDAudioClient;
+        if (device.Activate(ref iidClient, 23 /* CLSCTX_ALL */, IntPtr.Zero, out object? unknown) != 0
+            || unknown is not AudioInterop.IAudioClient client)
+        {
+            Log.Warn($"Audio meter: {id} will not activate an IAudioClient");
+            return null;
+        }
 
-        var td = new float[Spectrum.FftSize];
-        var bands = new float[Spectrum.BandCount];
-        const float sampleRate = 48000f;
+        var format = MixFormat(client);
+        int hr = client.Initialize(AudioInterop.AudioClientShareModeShared,
+            AudioInterop.StreamFlagsLoopback | AudioInterop.StreamFlagsAutoConvertPcm,
+            200_000, 0, ref format, IntPtr.Zero); // 200 ms in 100-ns units
+        if (hr != 0)
+        {
+            // WAVEFORMATEXTENSIBLE carries an extension the flat struct cannot express. Fall back
+            // to plain 48 kHz float, which every driver accepts with AutoConvertPcm.
+            format = AudioInterop.WAVEFORMATEX.Float48kHzStereo();
+            hr = client.Initialize(AudioInterop.AudioClientShareModeShared,
+                AudioInterop.StreamFlagsLoopback | AudioInterop.StreamFlagsAutoConvertPcm,
+                200_000, 0, ref format, IntPtr.Zero);
+        }
+        if (hr != 0)
+        {
+            Log.Warn($"Audio meter: {id} Initialize failed {hr:X8}");
+            return null;
+        }
+
+        var iidCapture = AudioInterop.IIDCaptureClient;
+        if (client.GetService(ref iidCapture, out unknown) != 0
+            || unknown is not AudioInterop.IAudioCaptureClient source)
+        {
+            Log.Warn($"Audio meter: {id} has no IAudioCaptureClient");
+            return null;
+        }
+        if (client.Start() != 0)
+        {
+            Log.Warn($"Audio meter: {id} would not start");
+            return null;
+        }
+
+        return new Capture { Id = id, Client = client, Source = source, Format = format };
+    }
+
+    private static AudioInterop.WAVEFORMATEX MixFormat(AudioInterop.IAudioClient client)
+    {
+        try
+        {
+            if (client.GetMixFormat(out IntPtr ptr) == 0 && ptr != IntPtr.Zero)
+            {
+                var format = Marshal.PtrToStructure<AudioInterop.WAVEFORMATEX>(ptr);
+                Marshal.FreeCoTaskMem(ptr);
+                if (format.SamplesPerSec >= 8000 && format.Channels > 0) return format;
+            }
+        }
+        catch { /* fall through to the universal format */ }
+        return AudioInterop.WAVEFORMATEX.Float48kHzStereo();
+    }
+
+    private void PumpLoop(Run run, List<Capture> captures)
+    {
+        var published = new float[Spectrum.BandCount];
+        bool announced = false;
 
         while (!run.Stop)
         {
-            uint packetSize = 0;
-            int hr = capture.GetNextPacketSize(out packetSize);
-            if (hr == unchecked((int)0x88890004) /* AUDCLNT_E_DEVICE_INVALIDATED */) { Log.Warn("Audio meter: device invalidated"); break; }
-            if (hr != 0 || packetSize == 0)
+            bool anyPacket = false;
+            Capture? loudest = null;
+            float peak = 0f;
+            foreach (var capture in captures)
             {
-                Decay(bands);
-                Publish(bands);
-                Thread.Sleep(10);
-                continue;
+                if (capture.Invalid) continue;
+                bool got;
+                try { got = capture.Pump(this); }
+                catch { capture.Invalid = true; continue; }
+                anyPacket |= got;
+                float local = 0f;
+                for (int i = 0; i < capture.Bands.Length; i++) local = Math.Max(local, capture.Bands[i]);
+                if (local > peak) { peak = local; loudest = capture; }
             }
-            Interlocked.Increment(ref _packets);
 
-            while (packetSize > 0)
+            if (loudest is not null && peak > 0.01f)
             {
-                hr = capture.GetBuffer(out IntPtr data, out uint numFrames, out uint flags, out _, out _);
-                if (hr == unchecked((int)0x88890004)) break;
-                if (hr != 0) break;
-
-                if (data != IntPtr.Zero && numFrames > 0 && (flags & AudioInterop.BufferFlagsSilent) == 0)
+                Array.Copy(loudest.Bands, published, published.Length);
+                if (!announced)
                 {
-                    Interlocked.Add(ref _frames, numFrames);
-                    int channels = fmt.Channels;
-                    int floatCount = (int)numFrames * channels;
-                    unsafe
-                    {
-                        var frame = new ReadOnlySpan<float>((float*)data, floatCount);
-                        for (int f = 0; f < frame.Length; f += channels)
-                        {
-                            float mono = 0f;
-                            for (int c = 0; c < channels; c++) mono += frame[f + c];
-                            mono /= channels;
-                            ring[ringHead] = mono;
-                            ringHead = (ringHead + 1) % ringCapacity;
-                            if (ringCount < ringCapacity) ringCount++;
-                        }
-                    }
+                    announced = true;
+                    Log.Info($"Audio meter: signal on {loudest.Id}");
                 }
-                capture.ReleaseBuffer(numFrames);
-                if (capture.GetNextPacketSize(out packetSize) != 0) break;
             }
-
-            while (ringCount >= Spectrum.FftSize)
+            else
             {
-                int readStart = (ringHead - ringCount + ringCapacity) % ringCapacity;
-                for (int i = 0; i < Spectrum.FftSize; i++)
-                    td[i] = ring[(readStart + i) % ringCapacity];
-                ringCount -= Spectrum.FftSize / 2;
-                Interlocked.Increment(ref _windows);
-                Spectrum.Magnitudes(td, sampleRate, bands, sensitivity: 1.0f);
-                Publish(bands);
+                Decay(published);
             }
+            Publish(published);
+            if (!anyPacket) Thread.Sleep(10);
         }
     }
 
-    private void Decay(float[] bands)
+    private static void Decay(float[] bands)
     {
         for (int i = 0; i < bands.Length; i++)
             bands[i] = Math.Max(0f, bands[i] - 0.012f);
