@@ -84,6 +84,24 @@ public class ConfigTests
         var json = JsonSerializer.Serialize(new AppConfig { Fit = FitMode.Stretch }, ConfigJsonContext.Default.AppConfig);
         Assert.Contains("\"Stretch\"", json);
     }
+
+    /// <summary>The file is split across AppConfig.cs, Settings.cs, DeviceBehaviour.cs and
+    /// ConfigStore.cs purely for reading. The JSON shape is a promise to every config already on
+    /// disk, so pin it: flat, and no section renamed or nested behind a new object.</summary>
+    [Fact]
+    public void JsonShapeStaysFlat()
+    {
+        var json = JsonSerializer.Serialize(new AppConfig(), ConfigJsonContext.Default.AppConfig);
+        using var doc = JsonDocument.Parse(json);
+
+        var names = doc.RootElement.EnumerateObject().Select(p => p.Name).ToList();
+        Assert.Equal(
+            ["wallpapers", "fit", "muteVideo", "volume", "liveVideoPreview", "clock", "info",
+             "pause", "widgets", "startMenuShortcutAdded"],
+            names);
+        Assert.False(doc.RootElement.TryGetProperty("behaviour", out _));
+        Assert.False(doc.RootElement.TryGetProperty("settings", out _));
+    }
 }
 
 /// <summary>The info widget's defaults. An upgrade must render exactly as it did before, so

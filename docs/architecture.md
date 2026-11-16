@@ -4,6 +4,8 @@ One process, two assemblies. **`PrismOS.Core`** is the engine (`Rendering/`, `De
 
 The engine is now four things rather than one `Engine` that did all of it: `WallpaperService` (per-monitor renderers, fit and audio settings, captured stills, the user's original wallpaper), `MonitorWindows` (one surface window per monitor, attached once and reused), `LockScreenService` (the policy key and its one-time elevation prompt), and `Autostart` (the sign-in entry). `Engine` is orchestration: widgets, tray, settings, gallery.
 
+`Config/` is split by question: `Settings.cs` is what the desktop looks like (clock, widgets, info, disc, halo), `DeviceBehaviour.cs` is what the machine should do (fit, audio, when to pause), `ConfigStore.cs` owns the file, and `AppConfig.cs` stays the single aggregate so the JSON schema never moves. `JsonShapeStaysFlat` pins that flat shape.
+
 Five moving parts:
 
 ```mermaid
@@ -77,6 +79,6 @@ Pausing is just `MediaPlayer.Pause()` — because rendering is event-driven, a p
 
 ## Testing strategy
 
-Pure logic is unit-tested (559 tests): fit-rect math, clock anchor/format/boundary-timer math, per-monitor DPI scaling, the date-styling fallback chain, the pause decision table, the GPU device-loss recovery budget, config round-trip and precedence, gallery manifest invariants (hosts, licenses, checksum shape, unique ids), virtual-screen coordinate mapping, the lock→wake ease curve, the still-image filename mapping, image-vs-video classification, and the Core/shell boundary itself.
+Pure logic is unit-tested (560 tests): fit-rect math, clock anchor/format/boundary-timer math, per-monitor DPI scaling, the date-styling fallback chain, the pause decision table, the GPU device-loss recovery budget, config round-trip, precedence and JSON shape, gallery manifest invariants (hosts, licenses, checksum shape, unique ids), virtual-screen coordinate mapping, the lock→wake ease curve, the still-image filename mapping, image-vs-video classification, and the Core/shell boundary itself.
 
 The interop layer cannot be unit-tested and is verified by running it. Topology detection and per-monitor DPI come out of `--diag`; rendering behind the icons on the raised topology is screenshot-verified; pause/resume transitions and wallpaper restoration on exit are exercised by hand. **What has not been verified on hardware is tracked honestly in [`recovery-matrix.md`](recovery-matrix.md)**, where an unrun row stays empty rather than being filled in from reading the code.
