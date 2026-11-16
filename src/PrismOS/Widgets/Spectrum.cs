@@ -24,6 +24,11 @@ public static class Spectrum
 
     static readonly float[] _hann = BuildHann();
 
+    // FFT work buffers are thread-static: the capture thread runs ~94 windows a second, and
+    // allocating two 4 KB arrays for each one was a steady stream of garbage for no reason.
+    [ThreadStatic] private static float[]? t_re;
+    [ThreadStatic] private static float[]? t_im;
+
     static float[] BuildHann()
     {
         var w = new float[FftSize];
@@ -37,12 +42,13 @@ public static class Spectrum
     /// The envelope state (one float per band) is carried by the caller.</summary>
     public static void Magnitudes(float[] timeDomain, float sampleRate, float[] bands, float sensitivity)
     {
-        var re = new float[FftSize];
-        var im = new float[FftSize];
+        var re = t_re ??= new float[FftSize];
+        var im = t_im ??= new float[FftSize];
+        Array.Clear(re);
+        Array.Clear(im);
         for (int i = 0; i < FftSize; i++)
         {
             re[i] = timeDomain[i] * _hann[i];
-            im[i] = 0f;
         }
         Fft(re, im);
 

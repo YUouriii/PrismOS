@@ -166,7 +166,7 @@ public sealed class GroupOverlay : IDisposable
 
     // ---- painting -----------------------------------------------------------------------------
 
-    private void Render()
+    private void Render(bool stripOnly = false)
     {
         lock (_sync)
         {
@@ -194,6 +194,8 @@ public sealed class GroupOverlay : IDisposable
             {
                 if (panel.HasStrip) _hasStrip = true;
                 var layers = EnsurePanel(panel);
+                if (layers.Face is not null && track is not null) _hasFace = true;
+                if (stripOnly && !panel.HasStrip) continue;
                 layers.Group.SetOffset(panel.Bounds.X, panel.Bounds.Y);
 
                 using var bmp = new Bitmap(panel.Bounds.Width, panel.Bounds.Height, PixelFormat.Format32bppPArgb);
@@ -205,16 +207,26 @@ public sealed class GroupOverlay : IDisposable
                         PanelBlur.ApplyUnderPanel(g, _monitor, stillPath, panel.Bounds, panel.CardRegions);
                     panel.Paint(g);
                 }
-                // A clock tick changes only the clock: the other panels paint the same pixels, so
-                // their shadow and present (the expensive part) are skipped.
-                var content = PanelContent.Hash(bmp);
-                if (layers.Content is null || !content.AsSpan().SequenceEqual(layers.Content))
+                if (stripOnly)
                 {
-                    // Pill-only panels skip the shadow — it just read as a dark box under the pill.
-                    if (!panel.NoShadow)
-                        BakedShadow.DrawBehind(bmp, ShadowRecipe.Default, scale, panel.FaceBox.IsEmpty ? null : panel.FaceBox);
+                    // The meter changed by definition. Skip the full-bitmap SHA-256 and present
+                    // straight away; the next full Render repaints because Content is cleared.
+                    layers.Content = null;
                     layers.Static.PresentBitmap(bmp);
-                    layers.Content = content;
+                }
+                else
+                {
+                    // A clock tick changes only the clock: the other panels paint the same pixels, so
+                    // their shadow and present (the expensive part) are skipped.
+                    var content = PanelContent.Hash(bmp);
+                    if (layers.Content is null || !content.AsSpan().SequenceEqual(layers.Content))
+                    {
+                        // Pill-only panels skip the shadow — it just read as a dark box under the pill.
+                        if (!panel.NoShadow)
+                            BakedShadow.DrawBehind(bmp, ShadowRecipe.Default, scale, panel.FaceBox.IsEmpty ? null : panel.FaceBox);
+                        layers.Static.PresentBitmap(bmp);
+                        layers.Content = content;
+                    }
                 }
 
                 if (layers.Face is not null && track is { } t)
@@ -351,8 +363,10 @@ public sealed class GroupOverlay : IDisposable
             lock (_sync)
             {
                 if (_disposed || !_meterTicking) return;
-                // Render() takes the same lock recursively; unchanged panels are not re-presented.
-                Render();
+                // Only the strip's phase changes between meter ticks. The clock, dial and battery
+                // panels are untouched — repainting, hashing and presenting them 30 times a second
+                // was the single largest CPU cost of the widgets.
+                Render(stripOnly: true);
             }
         }
         catch (Exception ex)
