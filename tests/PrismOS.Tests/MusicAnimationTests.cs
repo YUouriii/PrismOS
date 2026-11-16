@@ -38,4 +38,21 @@ public class MusicAnimationTests
 
         Assert.True(differing > 20, $"{theme}: only {differing} pixels changed for a new phase");
     }
+
+    [Theory]
+    [InlineData(WidgetTheme.Orbit)]
+    [InlineData(WidgetTheme.Monolith)]
+    public void FrostRegion_SitsOnThePaintedCard_NotOffsetByTheShadowPad(WidgetTheme theme)
+    {
+        var input = Group.Input();
+        var panel = GroupThemes.For(theme).Layout(input).First(p => p.HasStrip);
+        var region = Assert.Single(panel.CardRegions!);
+        var strip = GroupThemes.PaddedStrip(input.Track!.Value, input.Source, input.Scale);
+
+        // Both themes centre the padded strip in the panel. The frosted region must start where the
+        // card is painted — adding the strip's shadow pad again left a dark rectangle visible
+        // behind and to the right of the pill.
+        double expectedX = (panel.Bounds.Width - strip.Size.Width) / 2.0;
+        Assert.InRange(region.Bounds.X, expectedX - 2, expectedX + 2);
+    }
 }

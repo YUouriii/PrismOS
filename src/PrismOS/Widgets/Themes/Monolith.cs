@@ -73,7 +73,9 @@ public sealed class Monolith : IGroupTheme
             IReadOnlyList<PanelBlur.Region>? cardRegions = null;
             if (strip is { } sl && set.StripOrigin is { } so)
             {
-                cardRegions = [new PanelBlur.Region(new RectangleF(pad + so.X + sl.Pad, pad + so.Y + sl.Pad, sl.Metrics.Size.Width, sl.Metrics.Size.Height), sl.Metrics.Size.Height * 0.3f)];
+                // The strip paints at (pad + so.X, pad); adding sl.Pad here offset the frosted
+                // glass and left a dark rectangle visible behind the pill.
+                cardRegions = [new PanelBlur.Region(new RectangleF(pad + so.X, pad, sl.Metrics.Size.Width, sl.Metrics.Size.Height), sl.Metrics.Size.Height * 0.3f)];
             }
 
             panels.Add(new GroupPanel("monolith-strip", new Rectangle(origin, size), Rectangle.Empty,

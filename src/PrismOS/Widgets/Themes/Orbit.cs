@@ -80,8 +80,11 @@ public sealed class Orbit : IGroupTheme
             if (battery is not null) PaintBatteryRing(g, ring, input, s, caption, captionFont, tracking);
         }
 
+        // The pill is painted at (stripX, stripY) — the layout's pad is already part of stripX/stripY,
+        // so the frost region must sit exactly there. Adding strip.Pad again offset the blurred
+        // glass down/right by ten pixels and read as a dark shadow behind the card.
         IReadOnlyList<PanelBlur.Region>? cardRegions = strip is null ? null
-            : [new PanelBlur.Region(new RectangleF(stripX + strip.Value.Pad, stripY + strip.Value.Pad, strip.Value.Metrics.Size.Width, strip.Value.Metrics.Size.Height), strip.Value.Metrics.Size.Height * 0.3f)];
+            : [new PanelBlur.Region(new RectangleF(stripX, stripY, strip.Value.Metrics.Size.Width, strip.Value.Metrics.Size.Height), strip.Value.Metrics.Size.Height * 0.3f)];
 
         return [new GroupPanel("orbit", new Rectangle(origin, size), Rectangle.Empty, Paint,
             cardRegions, NoShadow: true, HasStrip: strip is not null)];
