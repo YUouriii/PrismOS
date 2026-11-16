@@ -739,12 +739,19 @@ public sealed class Engine : IDisposable
     }
 
     private readonly float[] _bandsScratch = new float[Spectrum.BandCount];
+    private long _lastAudible;
 
     /// <summary>Latest loopback-meter reading: 12 float values, attack-fast and release-slow.
-    /// The music pill paints its spectrum bars from the same numbers every frame.
-    /// Zero until the meter has seen audio (or the device is unavailable).</summary>
-    public float[] ReadBands()
+    /// Null when there is no signal — no capture device, or a session whose audio never reaches
+    /// the default render endpoint — so the pill falls back to its animated bars instead of a
+    /// frozen flat line, and switches back the moment real audio arrives.</summary>
+    public float[]? ReadBands()
     {
+        bool audible = _meter.IsAudible;
+        long now = Environment.TickCount64;
+        if (audible) _lastAudible = now;
+        if (!_meter.Available || now - _lastAudible > 2500) return null;
+
         _meter.Read(_bandsScratch);
         return (float[])_bandsScratch.Clone();
     }

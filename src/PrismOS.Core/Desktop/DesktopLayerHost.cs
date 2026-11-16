@@ -147,30 +147,12 @@ public sealed class DesktopLayerHost : IDisposable
             User32.SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 
-    /// <summary>Where a clickable, invisible child can live: the window that owns the desktop
-    /// icons, so it can be placed above them. The widget surfaces themselves stay below the icons
-    /// so they never cover one; a hit target placed there is never under the mouse, which is why
-    /// the transport buttons need their own layer.</summary>
-    public IntPtr HitLayerParent()
-    {
-        if (Layer.DefView != IntPtr.Zero)
-        {
-            IntPtr defParent = User32.GetParent(Layer.DefView);
-            if (defParent != IntPtr.Zero) return defParent;
-        }
-        return Layer.Topology == DesktopTopology.RaisedDesktop ? Layer.Progman : Layer.WorkerW;
-    }
-
-    /// <summary>Maps a monitor-relative rect into the client space of <paramref name="parent"/>.
-    /// A parent's client origin is its own window rect, which for the desktop layer is not the
-    /// monitor's origin.</summary>
-    public static RECT ToClient(IntPtr parent, in MonitorInfo monitor, in RECT monitorRect)
-    {
-        User32.GetWindowRect(parent, out var parentRect);
-        var screen = new RECT(monitorRect.Left + monitor.Bounds.Left, monitorRect.Top + monitor.Bounds.Top,
-            monitorRect.Right + monitor.Bounds.Left, monitorRect.Bottom + monitor.Bounds.Top);
-        return MonitorTracker.ScreenToParentClient(screen, parentRect);
-    }
+    /// <summary>The top-level desktop window. A media hit target is inserted directly above it:
+    /// a clickable child of the widget surface is useless because that surface sits below the
+    /// icons and never sees the mouse.</summary>
+    public IntPtr DesktopTopWindow() => Layer.Topology == DesktopTopology.RaisedDesktop
+        ? Layer.Progman
+        : (Layer.DefView != IntPtr.Zero ? User32.GetAncestor(Layer.DefView, 2) : Layer.Progman);
 
     /// <summary>Screen rect of the layer parent — children position relative to this.</summary>
     public RECT ParentScreenRect()

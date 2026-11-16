@@ -4,7 +4,6 @@ using Timer = System.Threading.Timer;
 using PrismOS.Common;
 using PrismOS.Config;
 using PrismOS.Desktop;
-using PrismOS.Interop;
 using PrismOS.Rendering;
 using PrismOS.Widgets.Themes;
 
@@ -48,7 +47,7 @@ public sealed class GroupOverlay : IDisposable
     private readonly Timer _spinTimer;
     private readonly Lock _sync = new();
     private readonly Dictionary<string, PanelLayers> _panels = [];
-    private readonly IntPtr _hitParent;
+    private readonly IntPtr _desktopLayer;
 
     private bool _disposed;
     private bool _suspended;
@@ -84,9 +83,8 @@ public sealed class GroupOverlay : IDisposable
         _spinTimer = new Timer(_ => SpinTick(), null, Timeout.Infinite, Timeout.Infinite);
 
         // The buttons must be clickable: the widget surface sits below the desktop icons, so the
-        // invisible hit target lives in the icon layer above them instead.
-        var hitParent = layer?.HitLayerParent() ?? IntPtr.Zero;
-        _hitParent = hitParent != IntPtr.Zero ? hitParent : host.Hwnd;
+        // invisible hit target goes just above the desktop instead.
+        _desktopLayer = layer?.DesktopTopWindow() ?? IntPtr.Zero;
 
         if (_nowPlaying is not null) _nowPlaying.Changed += OnSourceChanged;
         if (_battery is not null) _battery.Changed += OnSourceChanged;
@@ -360,8 +358,8 @@ public sealed class GroupOverlay : IDisposable
         _nowPlaying?.SendCommand(command);
     }
 
-    /// <summary>Maps the panel's button rects to the hit target's client coordinates and moves the
-    /// invisible click window over them. No buttons, no window.</summary>
+    /// <summary>Maps the panel's button rects to virtual-screen coordinates and moves the invisible
+    /// click window over them. No buttons, no window.</summary>
     private void PositionHitWindow(IReadOnlyList<GroupPanel> panels)
     {
         var record = panels.FirstOrDefault(p => p.Buttons is not null);
@@ -370,22 +368,15 @@ public sealed class GroupOverlay : IDisposable
             _hitWindow?.Hide();
             return;
         }
-        _hitWindow ??= new RecordHitWindow(_hitParent, SendMediaCommand);
+        _hitWindow ??= new RecordHitWindow(_desktopLayer, SendMediaCommand);
 
-        // Panel bounds are monitor-relative, and the hit target's parent is the desktop layer,
-        // whose client origin is its own window rect — not the monitor's.
-        var origin = HitClient(new Point(record.Bounds.X, record.Bounds.Y));
-        var buttons = record.Buttons!.Select(b => new Rectangle(origin.X + b.X, origin.Y + b.Y, b.Width, b.Height)).ToArray();
+        // Panel bounds are monitor-relative; the hit window is a top-level window in virtual-screen
+        // coordinates.
+        int ox = record.Bounds.X + _monitor.Bounds.Left;
+        int oy = record.Bounds.Y + _monitor.Bounds.Top;
+        var buttons = record.Buttons!.Select(b => new Rectangle(ox + b.X, oy + b.Y, b.Width, b.Height)).ToArray();
         var band = new Rectangle(buttons[0].X, buttons[0].Y, buttons[^1].Right - buttons[0].X, buttons[0].Height);
         _hitWindow.Reposition(band, buttons);
-    }
-
-    private Point HitClient(Point monitorRelative)
-    {
-        if (_hitParent == _host.Hwnd) return monitorRelative;
-        var mapped = DesktopLayerHost.ToClient(_hitParent, _monitor,
-            new RECT(monitorRelative.X, monitorRelative.Y, monitorRelative.X, monitorRelative.Y));
-        return new Point(mapped.Left, mapped.Top);
     }
 
     public void Dispose()

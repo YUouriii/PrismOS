@@ -36,7 +36,7 @@ public sealed class NowPlayingOverlay : IDisposable
     private readonly Lock _sync = new();
 
     private RecordHitWindow? _hitWindow;
-    private readonly IntPtr _hitParent;
+    private readonly IntPtr _desktopLayer;
     private SIZE _size;
     private float _phase;
     private readonly Func<MonitorInfo, string?>? _backdrop;
@@ -62,9 +62,8 @@ public sealed class NowPlayingOverlay : IDisposable
         _blur = blur;
         _style = style ?? WidgetStyle.Classic;
         // The buttons must be clickable: the pill's own surface sits below the desktop icons, so
-        // the invisible hit target lives in the icon layer above them instead.
-        var hitParent = layer?.HitLayerParent() ?? IntPtr.Zero;
-        _hitParent = hitParent != IntPtr.Zero ? hitParent : host.Hwnd;
+        // the invisible hit target goes just above the desktop instead.
+        _desktopLayer = layer?.DesktopTopWindow() ?? IntPtr.Zero;
         _timer = new Timer(_ => Tick(), null, Timeout.Infinite, Timeout.Infinite);
 
         _source.Changed += OnSourceChanged;
@@ -223,33 +222,24 @@ public sealed class NowPlayingOverlay : IDisposable
         }
     }
 
-    /// <summary>The buttons live on the invisible clickable window, positioned in client
-    /// coordinates of the desktop layer over the pill's button band.</summary>
+    /// <summary>The buttons live on an invisible clickable window over the pill, in virtual-screen
+    /// coordinates just above the desktop layer.</summary>
     private void PositionHitWindow(MusicStrip.Metrics metrics, Interop.POINT screenPos, int pad)
     {
         if (_hitWindow is null)
-            _hitWindow = new RecordHitWindow(_hitParent, SendMediaCommand);
+            _hitWindow = new RecordHitWindow(_desktopLayer, SendMediaCommand);
 
-        // The pill sits pad pixels inside its overlay window; the hit target's parent is the
-        // desktop layer, whose client origin is its own window rect rather than the monitor's.
-        var origin = HitClient(new Point(screenPos.X - _monitor.Bounds.Left, screenPos.Y - _monitor.Bounds.Top));
-        int bx = origin.X + pad + metrics.PrevBox.X, by = origin.Y + pad + metrics.PrevBox.Y;
+        // The pill sits pad pixels inside its overlay window, which is already positioned in
+        // virtual-screen coordinates.
+        int bx = screenPos.X + pad + metrics.PrevBox.X, by = screenPos.Y + pad + metrics.PrevBox.Y;
         var band = new Rectangle(bx, by, metrics.NextBox.Right - metrics.PrevBox.X, metrics.PrevBox.Height);
         var buttons = new Rectangle[]
         {
             new(bx, by, metrics.PrevBox.Width, metrics.PrevBox.Height),
-            new(origin.X + pad + metrics.PlayBox.X, origin.Y + pad + metrics.PlayBox.Y, metrics.PlayBox.Width, metrics.PlayBox.Height),
-            new(origin.X + pad + metrics.NextBox.X, origin.Y + pad + metrics.NextBox.Y, metrics.NextBox.Width, metrics.NextBox.Height),
+            new(screenPos.X + pad + metrics.PlayBox.X, screenPos.Y + pad + metrics.PlayBox.Y, metrics.PlayBox.Width, metrics.PlayBox.Height),
+            new(screenPos.X + pad + metrics.NextBox.X, screenPos.Y + pad + metrics.NextBox.Y, metrics.NextBox.Width, metrics.NextBox.Height),
         };
         _hitWindow.Reposition(band, buttons);
-    }
-
-    private Point HitClient(Point monitorRelative)
-    {
-        if (_hitParent == _host.Hwnd) return monitorRelative;
-        var mapped = DesktopLayerHost.ToClient(_hitParent, _monitor,
-            new RECT(monitorRelative.X, monitorRelative.Y, monitorRelative.X, monitorRelative.Y));
-        return new Point(mapped.Left, mapped.Top);
     }
 
     private void SendMediaCommand(int index)

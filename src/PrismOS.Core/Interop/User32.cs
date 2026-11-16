@@ -260,6 +260,7 @@ public static class Win32Constants
 
     // GetWindow
     public const uint GW_HWNDNEXT = 2;
+public const uint GW_HWNDPREV = 3;
     public const uint GW_CHILD = 5;
 
     // Messages

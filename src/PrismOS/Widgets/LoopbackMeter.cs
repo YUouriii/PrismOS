@@ -38,6 +38,14 @@ public sealed class LoopbackMeter : IDisposable
     private readonly float[] _bands = new float[Spectrum.BandCount];
     private volatile bool _available;
 
+    // Counters for the diagnostics page and for figuring out a silent endpoint: they say whether
+    // the capture saw packets, samples and FFT windows, not just whether a device was found.
+    private long _packets, _frames, _windows;
+
+    public long Packets => Interlocked.Read(ref _packets);
+    public long Frames => Interlocked.Read(ref _frames);
+    public long Windows => Interlocked.Read(ref _windows);
+
     private Run? _run;
 
     public bool Available => _available;
@@ -180,6 +188,7 @@ public sealed class LoopbackMeter : IDisposable
                 Thread.Sleep(10);
                 continue;
             }
+            Interlocked.Increment(ref _packets);
 
             while (packetSize > 0)
             {
@@ -189,6 +198,7 @@ public sealed class LoopbackMeter : IDisposable
 
                 if (data != IntPtr.Zero && numFrames > 0 && (flags & AudioInterop.BufferFlagsSilent) == 0)
                 {
+                    Interlocked.Add(ref _frames, numFrames);
                     int channels = fmt.Channels;
                     int floatCount = (int)numFrames * channels;
                     unsafe
@@ -215,6 +225,7 @@ public sealed class LoopbackMeter : IDisposable
                 for (int i = 0; i < Spectrum.FftSize; i++)
                     td[i] = ring[(readStart + i) % ringCapacity];
                 ringCount -= Spectrum.FftSize / 2;
+                Interlocked.Increment(ref _windows);
                 Spectrum.Magnitudes(td, sampleRate, bands, sensitivity: 1.0f);
                 Publish(bands);
             }
