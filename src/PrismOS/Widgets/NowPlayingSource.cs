@@ -82,6 +82,7 @@ public sealed partial class NowPlayingSource : IWidgetSource
     private Bitmap? _art;
     private string? _artTrackId;
     private string _artKey = "";
+    private string _iconKey = "";
     private string? _sourceApp;
 
     /// <summary>The media app's AUMID as Windows reports it, e.g. "Spotify.exe" or
@@ -289,26 +290,29 @@ public sealed partial class NowPlayingSource : IWidgetSource
 
                 // Fetched once per track, off the render path. The cache key deliberately ignores
                 // playing state, so pausing does not throw the artwork away and refetch it.
+                // The first fetch after a track change can catch the browser before its thumbnail
+                // is ready, leaving the icon cached for the whole track. Keep retrying the session
+                // thumbnail while we only have a fallback; stop once real art has been applied.
                 artKey = $"{aumid}|{reading.TrackId}";
-                if (artKey != _artKey)
+                bool haveRealArt = artKey == _artKey;
+                if (!haveRealArt)
                 {
                     fetchedArt = await LoadArtAsync(props?.Thumbnail);
-                    artSource = fetchedArt is not null ? "media session" : "";
-
-                    // A browser with no session thumbnail can still have a real cover online. Look
-                    // the track up once by artist and title before settling for the app icon.
-                    if (fetchedArt is null && !string.IsNullOrWhiteSpace(props?.Artist))
+                    if (fetchedArt is not null)
                     {
-                        fetchedArt = await OnlineArt.Find(props.Title, props.Artist);
-                        artSource = fetchedArt is not null ? "online search" : "";
+                        artSource = "media session";
                     }
-
-                    // A browser playing a short video often publishes no Thumbnail at all. Use the
-                    // source app's icon rather than leaving a generic note glyph in the art box.
-                    if (fetchedArt is null)
+                    else if (artKey != _iconKey)
                     {
-                        fetchedArt = MusicArt.ForSource(aumid, FriendlySourceName(aumid));
-                        artSource = "source app";
+                        // A browser with no session thumbnail can still have a real cover online.
+                        // Look it up once per track, then fall back to the source app's icon.
+                        fetchedArt = await OnlineArt.Find(props?.Title, props?.Artist);
+                        if (fetchedArt is not null) artSource = "online search";
+                        else
+                        {
+                            fetchedArt = MusicArt.ForSource(aumid, FriendlySourceName(aumid));
+                            artSource = "source app";
+                        }
                     }
                     if (fetchedArt is not null)
                         Log.Info($"Now playing: art from the {artSource}");
@@ -333,13 +337,18 @@ public sealed partial class NowPlayingSource : IWidgetSource
             }
 
             bool trackChanged = reading.TrackId != _artTrackId;
-            bool artChanged = artKey.Length > 0 && artKey != _artKey;
-            if (trackChanged || artChanged)
+            bool artApplied = fetchedArt is not null && artKey.Length > 0 && artKey != _artKey
+                              && (artSource != "source app" || artKey != _iconKey);
+            if (trackChanged || artApplied)
             {
                 _art?.Dispose();
                 _art = fetchedArt;
                 _artTrackId = reading.TrackId;
-                _artKey = artKey;
+                if (artApplied)
+                {
+                    if (artSource == "source app") _iconKey = artKey;
+                    else { _artKey = artKey; _iconKey = artKey; }
+                }
             }
             else
             {
@@ -371,7 +380,7 @@ public sealed partial class NowPlayingSource : IWidgetSource
             }
             // Otherwise keep the clock we are running: a stale zero from the session is not a seek.
             bool progressStarted = reported > 0.001d && _current.Progress <= 0.001d;
-            if (!trackChanged && !artChanged && next == _value && reading == _current) return;
+            if (!trackChanged && !artApplied && next == _value && reading == _current) return;
             _value = next;
             _current = reading;
             if (progressStarted)
