@@ -97,10 +97,16 @@ public sealed partial class NowPlayingSource : IWidgetSource
         get
         {
             if (!_current.IsPlaying || _lastDuration <= 0d) return _current;
-            double elapsed = (Environment.TickCount64 - _lastProgressAt) / 1000.0;
-            double progress = Math.Clamp(_lastProgress + elapsed / _lastDuration, 0d, 1d);
-            return _current with { Progress = progress };
+            return _current with { Progress = Estimated() };
         }
+    }
+
+    /// <summary>The running estimate, also used when deciding whether a new session reading is
+    /// newer than the clock we are already keeping.</summary>
+    private double Estimated()
+    {
+        double elapsed = (Environment.TickCount64 - _lastProgressAt) / 1000.0;
+        return Math.Clamp(_lastProgress + elapsed / _lastDuration, 0d, 1d);
     }
 
     public Bitmap? Art => _art;
@@ -313,20 +319,31 @@ public sealed partial class NowPlayingSource : IWidgetSource
                 fetchedArt?.Dispose();
             }
 
-            // Compare the reading as well as the text: the record redraws when the artwork or the
-            // playing state moves, neither of which necessarily changes a single character.
-            bool progressStarted = reading.Progress > 0.001d && _current.Progress <= 0.001d;
-            if (timelineDuration > TimeSpan.Zero)
+            // A browser can report a duration and still report Position = 0 on every poll. Resetting
+            // our clock to that stale zero made the bar fill for a second and snap back. Accept the
+            // session's position only when it is at or ahead of our estimate (a real timeline event
+            // or a seek forward), when the track or duration changed, or when a full bar followed by
+            // zero means the video looped. Otherwise keep the clock we are already running.
+            double reported = reading.Progress;
+            double estimated = _lastDuration > 0d && _current.IsPlaying ? Estimated() : 0d;
+            double duration = timelineDuration.TotalSeconds;
+            long now = Environment.TickCount64;
+            bool looped = estimated >= 0.98d && reported <= 0.02d;
+            if (trackChanged)
             {
-                _lastProgress = reading.Progress;
-                _lastDuration = timelineDuration.TotalSeconds;
-                _lastProgressAt = Environment.TickCount64;
+                _lastProgress = reported;
+                _lastDuration = duration;
+                _lastProgressAt = now;
             }
-            else if (trackChanged)
+            else if (duration > 0d && (Math.Abs(duration - _lastDuration) > 0.5d
+                                      || reported >= estimated - 0.02d || looped))
             {
-                _lastDuration = 0d;
-                _lastProgress = 0d;
+                _lastProgress = reported;
+                _lastDuration = duration;
+                _lastProgressAt = now;
             }
+            // Otherwise keep the clock we are running: a stale zero from the session is not a seek.
+            bool progressStarted = reported > 0.001d && _current.Progress <= 0.001d;
             if (!trackChanged && next == _value && reading == _current) return;
             _value = next;
             _current = reading;
