@@ -72,13 +72,24 @@ public sealed class DesktopLayerHost : IDisposable
         return new DesktopLayerInfo(DesktopTopology.ClassicWorkerW, progman, worker, shellDefView);
     }
 
-    /// <summary>Probes with retries — on 24H2+ the WorkerW is created lazily and may not
-    /// exist for a while after logon.</summary>
+    /// <summary>Probes with retries — on 24H2+ the WorkerW is created lazily, and a login start can
+    /// beat explorer itself. A fatal "Progman not found" here used to kill the silent startup
+    /// before any wallpaper could be attached.</summary>
     public void EnsureLayer()
     {
         for (int attempt = 0; ; attempt++)
         {
-            Layer = Probe();
+            try
+            {
+                Layer = Probe();
+            }
+            catch (InvalidOperationException) when (attempt < 100)
+            {
+                if (attempt == 0) Log.Info("Waiting for the desktop shell to start");
+                Thread.Sleep(300);
+                continue;
+            }
+
             bool ok = Layer.Topology == DesktopTopology.RaisedDesktop
                 ? Layer.WorkerW != IntPtr.Zero || Layer.DefView != IntPtr.Zero
                 : Layer.WorkerW != IntPtr.Zero;
