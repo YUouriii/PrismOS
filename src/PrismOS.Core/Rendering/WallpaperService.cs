@@ -62,13 +62,8 @@ public sealed class WallpaperService : IDisposable
     {
         foreach (var monitor in MonitorTracker.Enumerate())
         {
-            var path = _config.WallpaperFor(monitor.Device);
+            var path = ExistingWallpaperFor(monitor.Device);
             if (path is null) continue;
-            if (!File.Exists(path))
-            {
-                Log.Warn($"Configured wallpaper missing: {path}");
-                continue;
-            }
             try
             {
                 Apply(monitor, path);
@@ -109,8 +104,8 @@ public sealed class WallpaperService : IDisposable
     {
         foreach (var monitor in MonitorTracker.Enumerate())
         {
-            var path = _config.WallpaperFor(monitor.Device);
-            if (path is null || !File.Exists(path)) continue;
+            var path = ExistingWallpaperFor(monitor.Device);
+            if (path is null) continue;
             try
             {
                 Apply(monitor, path);
@@ -130,6 +125,25 @@ public sealed class WallpaperService : IDisposable
                 video.IsMuted = _config.MuteVideo;
                 video.Volume = _config.Volume;
             }
+    }
+
+    /// <summary>The configured path when it exists, otherwise the wildcard ('*') path when that
+    /// exists. A missing DISPLAY1-specific file previously blanked the monitor even though a
+    /// perfectly usable catch-all was configured for everything else.</summary>
+    private string? ExistingWallpaperFor(string monitorDevice)
+    {
+        var path = _config.WallpaperFor(monitorDevice);
+        if (path is not null && File.Exists(path)) return path;
+
+        var star = _config.Wallpapers.FirstOrDefault(w => string.Equals(w.Monitor, "*", StringComparison.Ordinal))?.Path;
+        if (star is not null && !string.IsNullOrWhiteSpace(star) && star != path && File.Exists(star))
+        {
+            Log.Warn($"Configured wallpaper missing ({path ?? "none"}); falling back to the '*' file {star}");
+            return star;
+        }
+
+        if (path is not null) Log.Warn($"Configured wallpaper missing: {path}");
+        return null;
     }
 
     /// <summary>Lock: park every wallpaper on frame 0 before the lock screen covers it.</summary>

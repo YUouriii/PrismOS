@@ -1058,6 +1058,7 @@ public sealed class SettingsForm : Form
         rows.AddRow("Fit mode", Choice(["Fill (crop)", "Fit (letterbox)", "Stretch"], (int)_config.Fit, i =>
         {
             _config.Fit = (FitMode)i;
+            _wallpaperPreview!.Fit = _config.Fit;
             _engine.RefreshWallpapers();
         }));
         rows.AddRow("Mute video", Check(_config.MuteVideo, v => { _config.MuteVideo = v; _engine.ApplyAudioSettings(); }));
@@ -1120,6 +1121,7 @@ public sealed class SettingsForm : Form
         bool liveVideo = exists && _config.LiveVideoPreview && WallpaperPreview.IsVideoPath(path!);
         if (exists && !liveVideo && WallpaperPreview.IsVideoPath(path!))
             previewSource = _engine.WallpaperStillPath(device);
+        _wallpaperPreview.Fit = _config.Fit;
         _wallpaperPreview.SetSource(previewSource);
         _wallpaperPreview.Caption = path is not null && exists ? Path.GetFileName(path) : "";
         _wallpaperPreview.Placeholder = path is null ? "No wallpaper on this display"

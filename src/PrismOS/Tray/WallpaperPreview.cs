@@ -1,5 +1,6 @@
 using System.Drawing.Drawing2D;
 using PrismOS.Common;
+using PrismOS.Config;
 
 namespace PrismOS.Tray;
 
@@ -23,6 +24,7 @@ public sealed class WallpaperPreview : Control
     private string? _path;
     private string _placeholder = "No wallpaper set";
     private string _caption = "";
+    private FitMode _fit = FitMode.Fill;
 
     public WallpaperPreview()
     {
@@ -44,6 +46,14 @@ public sealed class WallpaperPreview : Control
     {
         get => _placeholder;
         set { _placeholder = value; Invalidate(); }
+    }
+
+    /// <summary>How the wallpaper is painted into the monitor — mirrors the Fit mode setting.</summary>
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    public FitMode Fit
+    {
+        get => _fit;
+        set { _fit = value; Invalidate(); }
     }
 
     /// <summary>The file name of the wallpaper, drawn along the bottom edge.</summary>
@@ -147,12 +157,25 @@ public sealed class WallpaperPreview : Control
 
     private void DrawImage(Graphics g, Image image, Rectangle area)
     {
-        double scale = Math.Min((double)area.Width / image.Width, (double)area.Height / image.Height);
+        if (_fit == FitMode.Stretch)
+        {
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.DrawImage(image, area);
+            return;
+        }
+
+        double scale = _fit == FitMode.Fill
+            ? Math.Max((double)area.Width / image.Width, (double)area.Height / image.Height)
+            : Math.Min((double)area.Width / image.Width, (double)area.Height / image.Height);
         int w = Math.Max(1, (int)Math.Round(image.Width * scale));
         int h = Math.Max(1, (int)Math.Round(image.Height * scale));
+
+        var state = g.Save();
+        g.SetClip(area, CombineMode.Intersect);
         var dest = new Rectangle(area.X + (area.Width - w) / 2, area.Y + (area.Height - h) / 2, w, h);
         g.InterpolationMode = InterpolationMode.HighQualityBicubic;
         g.DrawImage(image, dest);
+        g.Restore(state);
     }
 
     protected override void OnVisibleChanged(EventArgs e)
