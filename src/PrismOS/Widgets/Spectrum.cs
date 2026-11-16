@@ -20,7 +20,7 @@ public static class Spectrum
 
     /// <summary>Attack multiplier (instant) and gravity/decay per processed frame.</summary>
     private static readonly float[] Gravity =
-        { 0.045f, 0.040f, 0.036f, 0.032f, 0.030f, 0.028f, 0.027f, 0.026f, 0.026f, 0.025f, 0.024f, 0.023f };
+        { 0.015f, 0.013f, 0.012f, 0.011f, 0.010f, 0.009f, 0.009f, 0.009f, 0.009f, 0.008f, 0.008f, 0.008f };
 
     static readonly float[] _hann = BuildHann();
 

@@ -61,13 +61,6 @@ public sealed class Orbit : IGroupTheme
         var ring = new RectangleF(pad + (colWidth - sat) / 2f, battTop, sat, sat);
         var caption = new RectangleF(pad + (colWidth - captionWidth) / 2f, battTop + sat + captionGap, captionWidth, lineH);
 
-        Rectangle[]? buttons = strip is null ? null :
-            [
-                Shift(strip.Value.Buttons[0], (int)stripX, (int)stripY),
-                Shift(strip.Value.Buttons[1], (int)stripX, (int)stripY),
-                Shift(strip.Value.Buttons[2], (int)stripX, (int)stripY),
-            ];
-
         void Paint(Graphics g)
         {
             using var captionFont = ThemeFonts.Create(ThemeFonts.Bahn, captionPx);
@@ -76,12 +69,11 @@ public sealed class Orbit : IGroupTheme
             if (clock) PaintDial(g, new RectangleF(pad + (colWidth - dial) / 2f, pad, dial, dial), input, s);
             if (strip is { } sl && track is { } t)
             {
-                float phase = Environment.TickCount64 / 1000f;
                 var save = g.Save();
                 g.TranslateTransform(stripX, stripY);
-                // The layout's metrics, not a fresh measure: the panel was sized from them, and
-                // the buttons' hit rects came from them.
-                MusicStrip.Paint(g, sl.Metrics, t, input.TrackArt, s, phase,
+                // The layout's metrics and the overlay's phase: shared with the size and animation
+                // of every other style, so nothing drifts or races here.
+                MusicStrip.Paint(g, sl.Metrics, t, input.TrackArt, s, input.Phase,
                                  input.Blur ? 150 : 216, input.TrackLevels, input.Accent);
                 g.Restore(save);
             }
@@ -91,9 +83,8 @@ public sealed class Orbit : IGroupTheme
         IReadOnlyList<PanelBlur.Region>? cardRegions = strip is null ? null
             : [new PanelBlur.Region(new RectangleF(stripX + strip.Value.Pad, stripY + strip.Value.Pad, strip.Value.Metrics.Size.Width, strip.Value.Metrics.Size.Height), strip.Value.Metrics.Size.Height * 0.3f)];
 
-        return [new GroupPanel("orbit", new Rectangle(origin, size), Rectangle.Empty, Paint, buttons, cardRegions, NoShadow: true)];
-
-        static Rectangle Shift(Rectangle r, int dx, int dy) => new(r.X + dx, r.Y + dy, r.Width, r.Height);
+        return [new GroupPanel("orbit", new Rectangle(origin, size), Rectangle.Empty, Paint,
+            cardRegions, NoShadow: true, HasStrip: strip is not null)];
     }
 
     private static void PaintDial(Graphics g, RectangleF box, GroupInput input, float s)

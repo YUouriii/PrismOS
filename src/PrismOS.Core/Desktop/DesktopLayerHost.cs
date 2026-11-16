@@ -147,13 +147,6 @@ public sealed class DesktopLayerHost : IDisposable
             User32.SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 
-    /// <summary>The top-level desktop window. A media hit target is inserted directly above it:
-    /// a clickable child of the widget surface is useless because that surface sits below the
-    /// icons and never sees the mouse.</summary>
-    public IntPtr DesktopTopWindow() => Layer.Topology == DesktopTopology.RaisedDesktop
-        ? Layer.Progman
-        : (Layer.DefView != IntPtr.Zero ? User32.GetAncestor(Layer.DefView, 2) : Layer.Progman);
-
     /// <summary>Screen rect of the layer parent — children position relative to this.</summary>
     public RECT ParentScreenRect()
     {

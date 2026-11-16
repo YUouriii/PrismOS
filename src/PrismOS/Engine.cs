@@ -357,7 +357,7 @@ public sealed class Engine : IDisposable
             Log.Info($"Widget group: {WidgetsConfig.ConfigName(theme)}, clock={_config.Clock.Enabled}, info={info}, sources=[{string.Join(", ", _config.Info.Sources)}]");
             _group = new GroupOverlay(window.EnsureHost(), GroupThemes.For(theme), _config, target,
                 _nowPlaying, _battery,
-                MonitorTracker.DpiScale(target, monitors), StyleFor(target.Device), MonitorStillPath, ReadBands, _host);
+                MonitorTracker.DpiScale(target, monitors), StyleFor(target.Device), MonitorStillPath, ReadBands);
             _recordDevice = target.Device;
             _nowPlaying?.Refresh();
         }
@@ -423,7 +423,7 @@ public sealed class Engine : IDisposable
             if (_config.Info.Disc.Enabled && _nowPlaying is not null)
             {
                 _record = new NowPlayingOverlay(window.EnsureHost(), _config.Info, target, _nowPlaying, dpi, style,
-                    MonitorStillPath, _config.Widgets.Blur, ReadBands, _host);
+                    MonitorStillPath, _config.Widgets.Blur, ReadBands);
                 _recordDevice = target.Device;
                 Log.Info($"Record: created (rotate={_config.Info.Disc.Rotate}, size={_config.Info.Disc.Size})");
             }

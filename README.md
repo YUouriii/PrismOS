@@ -114,10 +114,10 @@ or you choose it. Size goes from 50 to 300%.
 <sub>A real screen recording of a 4000x2250 clip. <i>Big Buck Bunny</i>, (c) copyright 2008 Blender Foundation, <a href="https://peach.blender.org">peach.blender.org</a>, <a href="https://creativecommons.org/licenses/by/3.0/">CC BY 3.0</a>.</sub>
 
 **A music pill for whatever you're playing.** Real album art from the Windows media session with the
-source app it came from, animated equalizer bars, and working previous / play-pause / next buttons —
-clickable, driving the player through the Windows media session. Any app with media controls counts,
-browser tabs included. The bars move only while something is actually playing; they stop with the
-desktop covered or the display off.
+source app it came from, a gentle animated equalizer, and the track's progress. Any app with a media
+session counts, browser tabs included. The bars move only while something is actually playing; they
+stop with the desktop covered or the display off. Playback is controlled from the player or its media
+keys — the desktop surface is click-through, so the pill carries no buttons.
 
 <div align="center">
 

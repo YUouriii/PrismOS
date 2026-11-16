@@ -68,19 +68,12 @@ public sealed class Tiles : IGroupTheme
         for (int i = 0; i < cards.Count; i++)
             cards[i] = (cards[i].Kind, new RectangleF(cards[i].Box.X + pad, cards[i].Box.Y + pad, cards[i].Box.Width, cards[i].Box.Height));
 
-        Rectangle[]? buttons = null;
         float stripInnerX = 0f;
         var stripMetrics = strip?.Metrics;
         if (strip is { } stripLayout)
         {
             var slot = cards.First(c => c.Kind == "music").Box;
             stripInnerX = (slot.Width - stripLayout.Metrics.Size.Width) / 2f;
-            buttons =
-            [
-                Shift(stripLayout.Buttons[0], (int)(slot.X + stripInnerX), (int)slot.Y),
-                Shift(stripLayout.Buttons[1], (int)(slot.X + stripInnerX), (int)slot.Y),
-                Shift(stripLayout.Buttons[2], (int)(slot.X + stripInnerX), (int)slot.Y),
-            ];
         }
 
         void Paint(Graphics g)
@@ -97,8 +90,7 @@ public sealed class Tiles : IGroupTheme
                     case "music":
                         var musicSave = g.Save();
                         g.TranslateTransform(box.X + stripInnerX, box.Y);
-                        float phase = Environment.TickCount64 / 1000f;
-                        MusicStrip.Paint(g, stripMetrics!.Value, track!.Value, input.TrackArt, stripScale, phase,
+                        MusicStrip.Paint(g, stripMetrics!.Value, track!.Value, input.TrackArt, stripScale, input.Phase,
                                          input.Blur ? 150 : 216, input.TrackLevels, input.Accent);
                         g.Restore(musicSave);
                         break;
@@ -111,7 +103,8 @@ public sealed class Tiles : IGroupTheme
             ? cards.Select(c => new PanelBlur.Region(c.Box, GroupThemes.U(Radius, s))).ToArray()
             : null;
 
-        return [new GroupPanel("tiles", new Rectangle(origin, size), Rectangle.Empty, Paint, buttons, cardRegions)];
+        return [new GroupPanel("tiles", new Rectangle(origin, size), Rectangle.Empty, Paint,
+            cardRegions, HasStrip: strip is not null)];
     }
 
     private static void PaintCard(Graphics g, RectangleF box, float s, bool blur)

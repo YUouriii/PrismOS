@@ -49,7 +49,7 @@ public class MusicStripTests
     {
         var m = Measure();
         var total = new Rectangle(Point.Empty, m.Size);
-        foreach (var box in new[] { m.ArtBox, m.EqBox, m.PrevBox, m.PlayBox, m.NextBox })
+        foreach (var box in new[] { m.ArtBox, m.EqBox })
             Assert.True(total.Contains(box), $"{box} is outside the {total} pill");
     }
 
@@ -60,7 +60,7 @@ public class MusicStripTests
         Assert.True(m.EqBox.Width >= 24, $"equalizer column is {m.EqBox.Width}px wide");
         Assert.True(m.EqBox.Height >= 20, $"equalizer column is {m.EqBox.Height}px tall");
         Assert.True(m.EqBox.Left > m.ArtBox.Right, "the meter must not sit over the artwork");
-        Assert.True(m.EqBox.Right < m.PrevBox.Left, "the meter must not sit under the transport");
+        Assert.True(m.EqBox.Right < m.Size.Width - 4, "the meter must not run off the card");
     }
 
     [Fact]

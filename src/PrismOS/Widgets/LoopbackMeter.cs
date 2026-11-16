@@ -235,7 +235,7 @@ public sealed class LoopbackMeter : IDisposable
     private void Decay(float[] bands)
     {
         for (int i = 0; i < bands.Length; i++)
-            bands[i] = Math.Max(0f, bands[i] - 0.04f);
+            bands[i] = Math.Max(0f, bands[i] - 0.012f);
     }
 
     private void Publish(float[] bands)

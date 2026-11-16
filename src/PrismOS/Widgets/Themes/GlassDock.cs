@@ -107,18 +107,6 @@ public sealed class GlassDock : IGroupTheme
             x += it.W + gap;
         }
 
-        Rectangle[]? buttons = null;
-        if (strip is { } sl)
-        {
-            var stripBox = boxes.First(item => item.Kind == Kind.Strip).Box;
-            buttons =
-            [
-                new Rectangle(sl.Buttons[0].X + (int)stripBox.X, sl.Buttons[0].Y + (int)stripBox.Y, sl.Buttons[0].Width, sl.Buttons[0].Height),
-                new Rectangle(sl.Buttons[1].X + (int)stripBox.X, sl.Buttons[1].Y + (int)stripBox.Y, sl.Buttons[1].Width, sl.Buttons[1].Height),
-                new Rectangle(sl.Buttons[2].X + (int)stripBox.X, sl.Buttons[2].Y + (int)stripBox.Y, sl.Buttons[2].Width, sl.Buttons[2].Height),
-            ];
-        }
-
         void Paint(Graphics g)
         {
             using var timeFont = ThemeFonts.Create(ThemeFonts.DisplayLight, GroupThemes.U(TimePx, s));
@@ -137,7 +125,7 @@ public sealed class GlassDock : IGroupTheme
                     case Kind.Strip:
                         var stripSave = g.Save();
                         g.TranslateTransform(box.X, box.Y);
-                        float phase = Environment.TickCount64 / 1000f;
+                        float phase = input.Phase;
                         MusicStrip.Paint(g, strip!.Value.Metrics, track!.Value, input.TrackArt, s, phase,
                                          input.Blur ? 150 : 216, input.TrackLevels, input.Accent);
                         g.Restore(stripSave);
@@ -160,8 +148,9 @@ public sealed class GlassDock : IGroupTheme
             }
         }
 
-        return [new GroupPanel("dock", new Rectangle(origin, size), Rectangle.Empty, Paint, buttons,
-            input.Blur ? [new PanelBlur.Region(capsule, capsule.Height / 2f)] : null, NoShadow: true)];
+        return [new GroupPanel("dock", new Rectangle(origin, size), Rectangle.Empty, Paint,
+            input.Blur ? [new PanelBlur.Region(capsule, capsule.Height / 2f)] : null,
+            NoShadow: true, HasStrip: strip is not null)];
     }
 
     private static char WidestDigit(Graphics g, Font font)

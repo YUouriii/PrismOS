@@ -6,21 +6,17 @@ using PrismOS.Common;
 
 namespace PrismOS.Widgets;
 
-/// <summary>The modern now-playing pill: album art, small-caps source app, title, artist and
-/// previous / play-pause / next buttons, on a rounded dark card. One renderer for every style,
-/// so Classic and the group themes share the face instead of each growing their own.
-///
-/// The three buttons are drawn here and hit-tested by an invisible clickable window the
-/// overlays own (the composition tree itself is click-through by construction, so clicks need
-/// a real window of their own).</summary>
+/// <summary>The now-playing pill: album art, small-caps source app, title, artist and a live
+/// meter, on a rounded dark card. One renderer for every style, so Classic and the group themes
+/// share the face instead of each growing their own. There are no transport controls: the desktop
+/// surface is click-through by construction and an invisible click window over it never received
+/// clicks reliably, so a row of buttons that looked like they worked was worse than none.</summary>
 public static class MusicStrip
 {
-    public const int ButtonCount = 3;
-
-    // Base proportions in pixels at scale 1 (the Windows 11 media pill).
+    // Base proportions in pixels at scale 1.
     private const float Height = 64f, ArtSidePx = 48f, PadPx = 8f, ArtGapPx = 10f, LineGapPx = 2f;
     private const float SourcePx = 8.5f, TitlePx = 12.5f, ArtistPx = 9.5f;
-    private const float ButtonPx = 28f, ButtonGapPx = 6f, ButtonsRightPx = 8f, TextButtonGapPx = 12f;
+    private const float RightPadPx = 12f;
     private const float MaxTextWidthPx = 190f;
 
     // The equalizer column. It used to be 16 px for twelve bands, which left the bars with a
@@ -28,28 +24,18 @@ public static class MusicStrip
     // merged bands with real gaps (see BarGeometry).
     private const float EqWidthPx = 30f, EqGapPx = 10f, EqHeightPx = 30f;
 
-    /// <summary>Everything a painter or a hit-test needs, in panel pixels. All boxes are
-    /// relative to the panel's top-left.</summary>
+    /// <summary>Everything a painter needs, in panel pixels. All boxes are relative to the
+    /// panel's top-left.</summary>
     public readonly record struct Metrics(
         Size Size, int Pad, int ArtSide, int ArtGap,
         int SourceTop, int TitleTop, int ArtistTop,
         string SourceText, string TitleText, string? ArtistText,
-        Rectangle ArtBox, Rectangle EqBox, Rectangle PrevBox, Rectangle PlayBox, Rectangle NextBox)
-    {
-        /// <summary>The clickable button rects, in order: previous, play/pause, next.</summary>
-        public Rectangle Button(int index) => index switch
-        {
-            0 => PrevBox, 1 => PlayBox, _ => NextBox,
-        };
+        Rectangle ArtBox, Rectangle EqBox);
 
-        public bool TryHitButton(Point panelPoint, out int index)
-        {
-            for (int i = 0; i < ButtonCount; i++)
-                if (Button(i).Contains(panelPoint)) { index = i; return true; }
-            index = -1;
-            return false;
-        }
-    }
+    /// <summary>Time in seconds for the animated meter. The paint rate is 30 fps; this is the
+    /// <em>speed</em> of the motion, deliberately decoupled from it — tying the phase to the frame
+    /// count made the bars race on a fast display and crawl on a slow one.</summary>
+    public static float BarPhase() => (float)(Environment.TickCount64 / 1000.0);
 
     /// <summary><paramref name="maxWidth"/> caps the whole pill — the text column shrinks
     /// first, so position never spills off the work area at large scales.</summary>
@@ -58,12 +44,10 @@ public static class MusicStrip
         float height = Height * scale, art = ArtSidePx * scale, pad = PadPx * scale;
         float secX = pad + art + ArtGapPx * scale;
 
-        // Everything the pill spends on things other than the text: art, gaps, the
-        // equalizer column and the transport buttons. The leftover goes to text, clamped
-        // so the pill is never wider than the caller's cap.
+        // Everything the pill spends on things other than the text: art, gaps and the equalizer
+        // column. The leftover goes to text, clamped so the pill is never wider than the cap.
         float eqWidth = EqWidthPx * scale, eqGap = EqGapPx * scale;
-        float buttonsW = ButtonPx * scale * 3 + ButtonGapPx * scale * 2;
-        float overhead = secX + eqGap + eqWidth + eqGap + TextButtonGapPx * scale + buttonsW + ButtonsRightPx * scale;
+        float overhead = secX + eqGap + eqWidth + RightPadPx * scale;
         float textWidth = Math.Min(MaxTextWidthPx * scale, Math.Max(maxWidth - overhead, 8f * scale));
 
         using var sourceFont = ThemeFonts.Create(ThemeFonts.TextSemibold, Math.Max(SourcePx * scale, 7f));
@@ -87,15 +71,8 @@ public static class MusicStrip
         float titleY = srcY + sourceSize.Height + LineGapPx * scale;
         float artistY = titleY + titleSize.Height + LineGapPx * scale;
 
-        float btn = ButtonPx * scale, gap = ButtonGapPx * scale;
-        float btnSize = btn * (ButtonCount - 1) + gap * (ButtonCount - 1) + btn;
-        float total = secX + textWidth + eqGap + eqWidth + eqGap + TextButtonGapPx * scale + btnSize + ButtonsRightPx * scale;
-
-        float btnY = (height - btn) / 2f;
         float eqX = secX + textWidth + eqGap;
-        float prevX = eqX + eqWidth + eqGap + TextButtonGapPx * scale;
-        float playX = prevX + btn + gap;
-        float nextX = playX + btn + gap;
+        float total = eqX + eqWidth + RightPadPx * scale;
 
         float eqH = Math.Min(EqHeightPx * scale, height * 0.56f);
         return new Metrics(
@@ -104,10 +81,7 @@ public static class MusicStrip
             (int)srcY, (int)titleY, (int)artistY,
             sourceText, titleText, artistText,
             new Rectangle((int)pad, (int)((height - art) / 2f), (int)art, (int)art),
-            new Rectangle((int)eqX, (int)((height - eqH) / 2f), (int)eqWidth, (int)eqH),
-            new Rectangle((int)prevX, (int)btnY, (int)btn, (int)btn),
-            new Rectangle((int)playX, (int)btnY, (int)btn, (int)btn),
-            new Rectangle((int)nextX, (int)btnY, (int)btn, (int)btn));
+            new Rectangle((int)eqX, (int)((height - eqH) / 2f), (int)eqWidth, (int)eqH));
     }
 
     /// <summary><paramref name="levels"/> carries the live 12-band meter (see LoopbackMeter).
@@ -170,11 +144,6 @@ public static class MusicStrip
         // a playful sine otherwise (previews and tests / no audio device).
         if (levels is not null) PaintEqualizer(g, m.EqBox, levels, r.IsPlaying);
         else PaintEqualizerSine(g, m.EqBox, eqPhase, r.IsPlaying);
-
-        // Transport buttons
-        DrawPrevButton(g, m.PrevBox);
-        DrawPlayButton(g, m.PlayBox, r.IsPlaying);
-        DrawNextButton(g, m.NextBox);
 
         PaintProgress(g, m, r, scale, accent);
     }
@@ -283,9 +252,9 @@ public static class MusicStrip
 
     private static void PaintEqualizerSine(Graphics g, Rectangle box, float phase, bool playing)
     {
-        // Base-level (not audio-reactive) bars: each band is a sum of incommensurate
-        // sines with slowly drifting phases, so they read as live audio without any
-        // capture device or FFT. Settles low and still when paused.
+        // Base-level (not audio-reactive) bars: two slow, incommensurate sines with a per-bar
+        // offset read as a gentle wave, not the frantic flicker that came from tying the phase to
+        // the 30 fps timer. The paint rate stays 30 fps; only the motion is slow.
         if (box.Width <= 0 || box.Height <= 0) return;
         var (bars, gap, barW) = BarGeometry(box, Spectrum.BandCount);
         float amp = playing ? 1f : 0.32f;
@@ -293,9 +262,9 @@ public static class MusicStrip
         using var path = new GraphicsPath();
         for (int i = 0; i < bars; i++)
         {
-            float band = amp * (0.55f
-                + 0.28f * MathF.Sin(phase * 12.7f + i * 1.31f)
-                + 0.17f * MathF.Sin(phase * 4.3f + i * 2.07f + 1.1f));
+            float band = amp * (0.60f
+                + 0.24f * MathF.Sin(phase * 2.6f + i * 0.62f)
+                + 0.16f * MathF.Sin(phase * 1.4f + i * 1.37f));
             float mag = Math.Clamp(band, 0.08f, 1f);
             float h = box.Height * Math.Max(mag, 0.08f);
             brush.Color = Color.FromArgb((int)(135 + 120 * Math.Min(1f, mag)), 255, 255, 255);
@@ -372,58 +341,4 @@ public static class MusicStrip
 
     private static GraphicsPath RoundedRect(Rectangle rect, float radius) =>
         RoundedRect(new RectangleF(rect.X, rect.Y, rect.Width, rect.Height), radius);
-
-    private static void DrawPrevButton(Graphics g, RectangleF box)
-    {
-        using var circle = new SolidBrush(Color.FromArgb(28, 255, 255, 255));
-        g.FillEllipse(circle, box);
-        float cx = box.X + box.Width / 2f, cy = box.Y + box.Height / 2f;
-        float rad = box.Width * 0.26f;
-        using var ink = new SolidBrush(Color.FromArgb(232, 255, 255, 255));
-        g.FillRectangle(ink, cx - rad, cy - rad * 0.72f, rad * 0.28f, rad * 1.44f);
-        var tri = new PointF[]
-        {
-            new(cx - rad * 0.34f, cy), new(cx + rad * 0.6f, cy - rad * 0.78f), new(cx + rad * 0.6f, cy + rad * 0.78f),
-        };
-        g.FillPolygon(ink, tri);
-    }
-
-    private static void DrawPlayButton(Graphics g, RectangleF box, bool playing)
-    {
-        using var circle = new SolidBrush(Color.FromArgb(240, 255, 255, 255));
-        g.FillEllipse(circle, box);
-        float cx = box.X + box.Width / 2f, cy = box.Y + box.Height / 2f;
-        float rad = box.Width * 0.26f;
-        var dark = new SolidBrush(Color.FromArgb(255, 26, 30, 39));
-        if (playing)
-        {
-            g.FillRectangle(dark, cx - rad * 0.72f, cy - rad * 0.72f, rad * 0.46f, rad * 1.44f);
-            g.FillRectangle(dark, cx + rad * 0.26f, cy - rad * 0.72f, rad * 0.46f, rad * 1.44f);
-        }
-        else
-        {
-            var tri = new PointF[]
-            {
-                new(cx - rad * 0.52f, cy - rad * 0.82f), new(cx - rad * 0.52f, cy + rad * 0.82f), new(cx + rad * 0.78f, cy),
-            };
-            g.FillPolygon(dark, tri);
-        }
-        dark.Dispose();
-    }
-
-    private static void DrawNextButton(Graphics g, RectangleF box)
-    {
-        using var circle = new SolidBrush(Color.FromArgb(28, 255, 255, 255));
-        g.FillEllipse(circle, box);
-        float cx = box.X + box.Width / 2f, cy = box.Y + box.Height / 2f;
-        float rad = box.Width * 0.26f;
-        using var ink = new SolidBrush(Color.FromArgb(232, 255, 255, 255));
-        float right = cx + rad;
-        g.FillRectangle(ink, right - rad * 0.28f, cy - rad * 0.72f, rad * 0.28f, rad * 1.44f);
-        var tri = new PointF[]
-        {
-            new(cx + rad * 0.34f, cy), new(cx - rad * 0.6f, cy - rad * 0.78f), new(cx - rad * 0.6f, cy + rad * 0.78f),
-        };
-        g.FillPolygon(ink, tri);
-    }
 }

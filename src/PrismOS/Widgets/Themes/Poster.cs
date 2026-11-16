@@ -159,18 +159,16 @@ public sealed class Poster : IGroupTheme
         var strip = GroupThemes.PaddedStrip(track, input.Source, s);
         var size = strip.Size;
         var origin = GroupThemes.Place(input.WorkArea, size, corner, margin);
-        var buttons = strip.Buttons;
-
         void Paint(Graphics g)
         {
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-            float phase = Environment.TickCount64 / 1000f;
+            float phase = input.Phase;
             g.TranslateTransform(strip.Pad, strip.Pad);
             MusicStrip.Paint(g, strip.Metrics, track, input.TrackArt, s, phase,
                              input.Blur ? 150 : 216, input.TrackLevels, input.Accent);
         }
 
-        return new GroupPanel("poster-record", new Rectangle(origin, size), Rectangle.Empty, Paint, buttons);
+        return new GroupPanel("poster-record", new Rectangle(origin, size), Rectangle.Empty, Paint, HasStrip: true);
     }
 
     // ---- battery bar --------------------------------------------------------------------------

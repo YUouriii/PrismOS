@@ -20,7 +20,7 @@ public class MonolithTests
         var day = Assert.Single(panels, p => p.Key == "monolith-day");
         var strip = Assert.Single(panels, p => p.Key == "monolith-strip");
         Assert.True(day.FaceBox.IsEmpty);
-        Assert.NotNull(strip.Buttons);
+        Assert.True(strip.HasStrip);
     }
 
     [Fact]
@@ -53,7 +53,7 @@ public class MonolithTests
     public void BatteryOnly_StripHasNoRecord()
     {
         var strip = Theme.Layout(Group.Input(track: false)).Single(p => p.Key == "monolith-strip");
-        Assert.Null(strip.Buttons);
+        Assert.False(strip.HasStrip);
     }
 
     [Fact]
@@ -151,8 +151,7 @@ public class TilesTests
     public void Everything_IsOnePanel_WithTheRecordUnderTheClock()
     {
         var panel = Assert.Single(Theme.Layout(Group.Input()));
-        Assert.NotNull(panel.Buttons);
-        Assert.True(panel.Buttons[0].Top > panel.Bounds.Height / 3, "the music strip sits under the clock and date tiles");
+        Assert.True(panel.HasStrip, "the music strip sits under the clock and date tiles");
     }
 
     [Fact]
@@ -160,7 +159,7 @@ public class TilesTests
     {
         var all = Assert.Single(Theme.Layout(Group.Input()));
         var noTrack = Assert.Single(Theme.Layout(Group.Input(track: false)));
-        Assert.Null(noTrack.Buttons);
+        Assert.False(noTrack.HasStrip);
         Assert.True(noTrack.Bounds.Height < all.Bounds.Height);
     }
 

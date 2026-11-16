@@ -83,9 +83,6 @@ public static partial class User32
     [DllImport("user32.dll")]
     public static extern IntPtr GetWindow(IntPtr hwnd, uint cmd);
 
-    [DllImport("user32.dll")]
-    public static extern IntPtr GetParent(IntPtr hwnd);
-
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     public static extern int GetClassNameW(IntPtr hwnd, StringBuilder buffer, int maxCount);
 

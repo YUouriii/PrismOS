@@ -10,16 +10,12 @@ using PrismOS.Widgets.Themes;
 
 namespace PrismOS.Widgets;
 
-/// <summary>The now-playing pill on its own overlay visual: album art (with equalizer bars while
-/// something plays), the source app over the title over the artist, and working previous /
-/// play-pause / next buttons.
+/// <summary>The now-playing pill on its own overlay visual: album art, source app, title, artist
+/// and a live meter. There are no transport controls: the desktop surface is click-through, and
+/// an invisible click window could not be made to receive clicks reliably, so buttons that looked
+/// like they worked were removed rather than left as decoration.
 ///
-/// Clicks on the buttons are delivered by an invisible clickable window
-/// (<see cref="RecordHitWindow"/>) — the composition tree itself is click-through by
-/// construction, so the buttons cannot be hit from it. The hit window paints nothing and moves
-/// with the pill.
-///
-/// The bars animate on the same 15 fps timer the old record used, and only while all of these
+/// The bars repaint on the same 30 fps timer that turns the record, and only while all of these
 /// hold: something is playing, the desktop is visible, the display is on, and Disc.Rotate
 /// (re-purposed as the animation switch) is set.</summary>
 public sealed class NowPlayingOverlay : IDisposable
@@ -35,10 +31,7 @@ public sealed class NowPlayingOverlay : IDisposable
     private readonly Timer _timer;
     private readonly Lock _sync = new();
 
-    private RecordHitWindow? _hitWindow;
-    private readonly IntPtr _desktopLayer;
     private SIZE _size;
-    private float _phase;
     private readonly Func<MonitorInfo, string?>? _backdrop;
     private readonly Func<float[]?>? _readBands;
     private readonly bool _blur;
@@ -50,7 +43,7 @@ public sealed class NowPlayingOverlay : IDisposable
     public NowPlayingOverlay(CompositionHost host, InfoConfig config, MonitorInfo monitor,
                              NowPlayingSource source, double dpiScale = 1.0, WidgetStyle? style = null,
                              Func<MonitorInfo, string?>? backdrop = null, bool blur = true,
-                             Func<float[]?>? readBands = null, DesktopLayerHost? layer = null)
+                             Func<float[]?>? readBands = null)
     {
         _host = host;
         _config = config;
@@ -61,9 +54,6 @@ public sealed class NowPlayingOverlay : IDisposable
         _readBands = readBands;
         _blur = blur;
         _style = style ?? WidgetStyle.Classic;
-        // The buttons must be clickable: the pill's own surface sits below the desktop icons, so
-        // the invisible hit target goes just above the desktop instead.
-        _desktopLayer = layer?.DesktopTopWindow() ?? IntPtr.Zero;
         _timer = new Timer(_ => Tick(), null, Timeout.Infinite, Timeout.Infinite);
 
         _source.Changed += OnSourceChanged;
@@ -151,7 +141,6 @@ public sealed class NowPlayingOverlay : IDisposable
             lock (_sync)
             {
                 if (_disposed || !_ticking) return;
-                _phase = (Environment.TickCount64 / 150f) % (MathF.PI * 2f * 4f); // slow wobble, shared with the bars
             }
             Render();
         }
@@ -172,7 +161,6 @@ public sealed class NowPlayingOverlay : IDisposable
             {
                 _size = default;
                 try { _host.RemoveOverlay(OverlayKey); } catch { /* host may already be gone */ }
-                _hitWindow?.Hide();
                 return;
             }
 
@@ -211,47 +199,13 @@ public sealed class NowPlayingOverlay : IDisposable
                         new Rectangle(screenPos.X - _monitor.Bounds.Left, screenPos.Y - _monitor.Bounds.Top, size.Cx, size.Cy),
                         [new PanelBlur.Region(new RectangleF(pad, pad, metrics.Size.Width, metrics.Size.Height), metrics.Size.Height * 0.32f)]);
                 g.TranslateTransform(pad, pad);
-                MusicStrip.Paint(g, metrics, reading, _source.Art, scale, _phase, _blur ? 150 : 216,
+                MusicStrip.Paint(g, metrics, reading, _source.Art, scale, MusicStrip.BarPhase(), _blur ? 150 : 216,
                                  _readBands?.Invoke(), _style.Accent);
                 g.ResetTransform();
                 BakedShadow.DrawBehind(bmp, ShadowRecipe.Default, scale);
             }
             overlay.PresentBitmap(bmp);
-
-            PositionHitWindow(metrics, screenPos, pad);
         }
-    }
-
-    /// <summary>The buttons live on an invisible clickable window over the pill, in virtual-screen
-    /// coordinates just above the desktop layer.</summary>
-    private void PositionHitWindow(MusicStrip.Metrics metrics, Interop.POINT screenPos, int pad)
-    {
-        if (_hitWindow is null)
-            _hitWindow = new RecordHitWindow(_desktopLayer, SendMediaCommand);
-
-        // The pill sits pad pixels inside its overlay window, which is already positioned in
-        // virtual-screen coordinates.
-        int bx = screenPos.X + pad + metrics.PrevBox.X, by = screenPos.Y + pad + metrics.PrevBox.Y;
-        var band = new Rectangle(bx, by, metrics.NextBox.Right - metrics.PrevBox.X, metrics.PrevBox.Height);
-        var buttons = new Rectangle[]
-        {
-            new(bx, by, metrics.PrevBox.Width, metrics.PrevBox.Height),
-            new(screenPos.X + pad + metrics.PlayBox.X, screenPos.Y + pad + metrics.PlayBox.Y, metrics.PlayBox.Width, metrics.PlayBox.Height),
-            new(screenPos.X + pad + metrics.NextBox.X, screenPos.Y + pad + metrics.NextBox.Y, metrics.NextBox.Width, metrics.NextBox.Height),
-        };
-        _hitWindow.Reposition(band, buttons);
-    }
-
-    private void SendMediaCommand(int index)
-    {
-        if (_disposed) return;
-        var command = index switch
-        {
-            0 => NowPlayingSource.MediaCommand.Previous,
-            1 => NowPlayingSource.MediaCommand.PlayPause,
-            _ => NowPlayingSource.MediaCommand.Next,
-        };
-        _source.SendCommand(command);
     }
 
     private float ThemeScale => _style.Size * (float)_dpiScale * (_config.Disc.Size / 112f);
@@ -265,8 +219,6 @@ public sealed class NowPlayingOverlay : IDisposable
             _ticking = false;
             _source.Changed -= OnSourceChanged;
             _timer.Dispose();
-            _hitWindow?.Dispose();
-            _hitWindow = null;
             try { _host.RemoveOverlay(OverlayKey); } catch { /* host may already be gone */ }
         }
     }

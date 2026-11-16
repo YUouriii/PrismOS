@@ -17,16 +17,17 @@ public sealed record GroupInput(
     DateTime Now, ClockConfig Clock, DiscConfig Disc, HaloConfig Halo,
     NowPlayingReading? Track, BatteryReading? Battery,
     Color Accent, float Scale, float Dpi, ClockAnchor? Position, Rectangle WorkArea, int MaxCharacters,
-    string? Source = null, Bitmap? TrackArt = null, bool Blur = true, float[]? TrackLevels = null);
+    string? Source = null, Bitmap? TrackArt = null, bool Blur = true, float[]? TrackLevels = null,
+    float Phase = 0f);
 
 /// <summary>One surface of a group theme. <paramref name="FaceBox"/>, relative to the panel, is where
 /// the turning record goes on its own layer above the panel; empty when the panel has none.
 /// <paramref name="Paint"/> draws everything else, measured by the same call that built it.
-/// <paramref name="Buttons"/> are the strip's clickable rects, panel-relative, for the overlay
-/// to place its hit window over. <paramref name="CardRegions"/> are the frosted-glass surfaces
-/// under the card-bearing parts, panel-relative.</summary>
+/// <paramref name="HasStrip"/> marks the panel carrying the music pill, so the overlay knows that
+/// panel must keep animating while something plays. <paramref name="CardRegions"/> are the frosted-glass
+/// surfaces under the card-bearing parts, panel-relative.</summary>
 public sealed record GroupPanel(string Key, Rectangle Bounds, Rectangle FaceBox, Action<Graphics> Paint,
-    Rectangle[]? Buttons = null, IReadOnlyList<PanelBlur.Region>? CardRegions = null, bool NoShadow = false);
+    IReadOnlyList<PanelBlur.Region>? CardRegions = null, bool NoShadow = false, bool HasStrip = false);
 
 /// <summary>Orbit, Poster, Glass dock, Monolith and Tiles: the set placed as a group at one position.</summary>
 public interface IGroupTheme
@@ -64,49 +65,41 @@ public static class GroupThemes
 
     // ---- the music pill --------------------------------------------------------------------------
 
-    /// <summary>The modern now-playing pill as one panel, measured once for size and painted with
-    /// the exact same renderer as the Classic overlay. <paramref name="Buttons"/> ride on the panel
-    /// so the overlay can position its invisible click window over them.</summary>
+    /// <summary>The now-playing pill as one panel, measured once for size and painted with the
+    /// exact same renderer as the Classic overlay.</summary>
     public static MusicStrip.Metrics StripMetrics(NowPlayingReading track, string? source, float scale, float maxWidth = float.MaxValue)
     {
         using var g = Graphics.FromHwnd(IntPtr.Zero);
         return MusicStrip.Measure(g, track, source, scale, maxWidth);
     }
 
-    /// <summary>The strip plus the room its shadow needs on every side, with the buttons' rects
-    /// already in panel coordinates. Every panel paint goes through TranslateTransform(pad, pad)
-    /// or equivalent — the shadow is baked inside the panel bitmap, and clipping kills it.</summary>
-    public readonly record struct StripLayout(int Pad, Size Size, MusicStrip.Metrics Metrics, Rectangle[] Buttons);
+    /// <summary>The strip plus the room its shadow needs on every side. Every panel paint goes
+    /// through TranslateTransform(pad, pad) or equivalent — the shadow is baked inside the panel
+    /// bitmap, and clipping kills it.</summary>
+    public readonly record struct StripLayout(int Pad, Size Size, MusicStrip.Metrics Metrics);
 
     public static StripLayout PaddedStrip(NowPlayingReading track, string? source, float scale, float maxWidth = float.MaxValue)
     {
         var metrics = StripMetrics(track, source, scale, maxWidth);
         int pad = Pad(scale);
-        var buttons = new[]
-        {
-            Shift(metrics.PrevBox, pad, pad), Shift(metrics.PlayBox, pad, pad), Shift(metrics.NextBox, pad, pad),
-        };
         var size = new Size(metrics.Size.Width + pad * 2, metrics.Size.Height + pad * 2);
-        return new StripLayout(pad, size, metrics, buttons);
-
-        static Rectangle Shift(Rectangle r, int dx, int dy) => new(r.X + dx, r.Y + dy, r.Width, r.Height);
+        return new StripLayout(pad, size, metrics);
     }
 
     public static GroupPanel StripPanel(string key, int x, int y, NowPlayingReading track,
-        string? source, Bitmap? art, float scale)
+        string? source, Bitmap? art, float scale, float phase = 0f)
     {
         var layout = PaddedStrip(track, source, scale);
         return new GroupPanel(key, new Rectangle(x, y, layout.Size.Width, layout.Size.Height),
             Rectangle.Empty,
             g =>
             {
-                float phase = Environment.TickCount64 / 1000f;
                 g.TranslateTransform(layout.Pad, layout.Pad);
                 // Painted from the layout's own metrics: measuring again here let the painted
-                // pill drift away from the size and button rects the panel was built with.
+                // pill drift away from the size the panel was built with.
                 MusicStrip.Paint(g, layout.Metrics, track, art, scale, phase, 216, null);
             },
-            layout.Buttons);
+            HasStrip: true);
     }
 
     /// <summary>The time's drawn colour: the configured Clock.Color. The themes used to hard-code

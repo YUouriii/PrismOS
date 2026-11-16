@@ -70,21 +70,15 @@ public sealed class Monolith : IGroupTheme
             var stripAnchor = panels.Count == 0 ? anchor : (ClockAnchor)((row == 2 ? 0 : 2) * 3 + col);
             var origin = GroupThemes.Place(input.WorkArea, size, stripAnchor, margin);
 
-            Rectangle[]? buttons = null;
             IReadOnlyList<PanelBlur.Region>? cardRegions = null;
             if (strip is { } sl && set.StripOrigin is { } so)
             {
-                buttons =
-                [
-                    new Rectangle(sl.Buttons[0].X + so.X + pad, sl.Buttons[0].Y + so.Y + pad, sl.Buttons[0].Width, sl.Buttons[0].Height),
-                    new Rectangle(sl.Buttons[1].X + so.X + pad, sl.Buttons[1].Y + so.Y + pad, sl.Buttons[1].Width, sl.Buttons[1].Height),
-                    new Rectangle(sl.Buttons[2].X + so.X + pad, sl.Buttons[2].Y + so.Y + pad, sl.Buttons[2].Width, sl.Buttons[2].Height),
-                ];
                 cardRegions = [new PanelBlur.Region(new RectangleF(pad + so.X + sl.Pad, pad + so.Y + sl.Pad, sl.Metrics.Size.Width, sl.Metrics.Size.Height), sl.Metrics.Size.Height * 0.3f)];
             }
 
             panels.Add(new GroupPanel("monolith-strip", new Rectangle(origin, size), Rectangle.Empty,
-                g => PaintMusicSet(g, set, track, battery, input, s, pad, strip?.Metrics), buttons, cardRegions, NoShadow: true));
+                g => PaintMusicSet(g, set, track, battery, input, s, pad, strip?.Metrics),
+                cardRegions, NoShadow: true, HasStrip: strip is not null));
         }
         return panels;
     }
@@ -192,7 +186,7 @@ public sealed class Monolith : IGroupTheme
         {
             var stripSave = g.Save();
             g.TranslateTransform(pad + origin.X, pad);
-            float phase = Environment.TickCount64 / 1000f;
+            float phase = input.Phase;
             // The capped metrics from Layout: measuring again without the cap made the painted
             // pill wider than the panel the layout had reserved.
             MusicStrip.Paint(g, m, t, input.TrackArt, s, phase,

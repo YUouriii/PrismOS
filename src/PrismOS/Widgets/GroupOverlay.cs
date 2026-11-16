@@ -47,7 +47,6 @@ public sealed class GroupOverlay : IDisposable
     private readonly Timer _spinTimer;
     private readonly Lock _sync = new();
     private readonly Dictionary<string, PanelLayers> _panels = [];
-    private readonly IntPtr _desktopLayer;
 
     private bool _disposed;
     private bool _suspended;
@@ -58,7 +57,6 @@ public sealed class GroupOverlay : IDisposable
     private bool _faceHasArt;
     private (string? Track, bool Art, bool Playing, int Side)? _presentedFace;
     private CompositionSurface? _faceLayer;
-    private RecordHitWindow? _hitWindow;
     private float _turns;
     private bool _ticking;
     private bool _hasFace;
@@ -66,8 +64,7 @@ public sealed class GroupOverlay : IDisposable
 
     public GroupOverlay(CompositionHost host, IGroupTheme theme, AppConfig config, MonitorInfo monitor,
                         NowPlayingSource? nowPlaying, BatterySource? battery, double dpiScale, WidgetStyle style,
-                        Func<MonitorInfo, string?>? backdrop = null, Func<float[]?>? readBands = null,
-                        DesktopLayerHost? layer = null)
+                        Func<MonitorInfo, string?>? backdrop = null, Func<float[]?>? readBands = null)
     {
         _host = host;
         _backdrop = backdrop;
@@ -81,10 +78,6 @@ public sealed class GroupOverlay : IDisposable
         _style = style;
         _clockTimer = new Timer(_ => Tick(), null, Timeout.Infinite, Timeout.Infinite);
         _spinTimer = new Timer(_ => SpinTick(), null, Timeout.Infinite, Timeout.Infinite);
-
-        // The buttons must be clickable: the widget surface sits below the desktop icons, so the
-        // invisible hit target goes just above the desktop instead.
-        _desktopLayer = layer?.DesktopTopWindow() ?? IntPtr.Zero;
 
         if (_nowPlaying is not null) _nowPlaying.Changed += OnSourceChanged;
         if (_battery is not null) _battery.Changed += OnSourceChanged;
@@ -182,7 +175,7 @@ public sealed class GroupOverlay : IDisposable
             var input = new GroupInput(DateTime.Now, _config.Clock, disc, halo, track, battery, _style.Accent,
                                        scale, _dpi, _config.Widgets.Position, work, _config.Info.MaxCharacters,
                                        NowPlayingSource.FriendlySourceName(_nowPlaying?.SourceApp), _nowPlaying?.Art,
-                                       _config.Widgets.Blur, _readBands?.Invoke());
+                                       _config.Widgets.Blur, _readBands?.Invoke(), MusicStrip.BarPhase());
 
             var panels = _theme.Layout(input);
             foreach (var gone in _panels.Keys.Except(panels.Select(p => p.Key)).ToList())
@@ -192,7 +185,7 @@ public sealed class GroupOverlay : IDisposable
             _hasStrip = false;
             foreach (var panel in panels)
             {
-                if (panel.Buttons is not null) _hasStrip = true;
+                if (panel.HasStrip) _hasStrip = true;
                 var layers = EnsurePanel(panel);
                 layers.Group.SetOffset(panel.Bounds.X, panel.Bounds.Y);
 
@@ -225,7 +218,6 @@ public sealed class GroupOverlay : IDisposable
             }
 
             if (!_hasFace) DropFace();
-            PositionHitWindow(panels);
         }
     }
 
@@ -347,38 +339,6 @@ public sealed class GroupOverlay : IDisposable
         }
     }
 
-    private void SendMediaCommand(int index)
-    {
-        var command = index switch
-        {
-            0 => NowPlayingSource.MediaCommand.Previous,
-            1 => NowPlayingSource.MediaCommand.PlayPause,
-            _ => NowPlayingSource.MediaCommand.Next,
-        };
-        _nowPlaying?.SendCommand(command);
-    }
-
-    /// <summary>Maps the panel's button rects to virtual-screen coordinates and moves the invisible
-    /// click window over them. No buttons, no window.</summary>
-    private void PositionHitWindow(IReadOnlyList<GroupPanel> panels)
-    {
-        var record = panels.FirstOrDefault(p => p.Buttons is not null);
-        if (record is null || _nowPlaying is null)
-        {
-            _hitWindow?.Hide();
-            return;
-        }
-        _hitWindow ??= new RecordHitWindow(_desktopLayer, SendMediaCommand);
-
-        // Panel bounds are monitor-relative; the hit window is a top-level window in virtual-screen
-        // coordinates.
-        int ox = record.Bounds.X + _monitor.Bounds.Left;
-        int oy = record.Bounds.Y + _monitor.Bounds.Top;
-        var buttons = record.Buttons!.Select(b => new Rectangle(ox + b.X, oy + b.Y, b.Width, b.Height)).ToArray();
-        var band = new Rectangle(buttons[0].X, buttons[0].Y, buttons[^1].Right - buttons[0].X, buttons[0].Height);
-        _hitWindow.Reposition(band, buttons);
-    }
-
     public void Dispose()
     {
         lock (_sync)
@@ -389,8 +349,6 @@ public sealed class GroupOverlay : IDisposable
             if (_battery is not null) _battery.Changed -= OnSourceChanged;
             _clockTimer.Dispose();
             _spinTimer.Dispose();
-            _hitWindow?.Dispose();
-            _hitWindow = null;
             DropFace();
             foreach (var key in _panels.Keys.ToList()) DropPanel(key);
             _face?.Dispose();
