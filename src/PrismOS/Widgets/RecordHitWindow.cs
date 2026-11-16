@@ -8,12 +8,13 @@ namespace PrismOS.Widgets;
 /// <summary>An invisible, clickable window over the transport buttons of the music pill.
 ///
 /// The wallpaper visual (composed by DirectComposition) is WS_EX_NOREDIRECTIONBITMAP with
-/// nothing to catch clicks, so the buttons live in a child window of the wallpaper surface.
-/// Child windows compose inside the wallpaper's visual and receive the clicks there —
-/// which is the whole point, and the shape live-wallpaper apps use.
+/// nothing to catch clicks, and it deliberately sits <em>below</em> the desktop icons so they stay
+/// usable — so a button drawn there is under the mouse but never under the click. The hit target
+/// therefore lives in the same layer as the icons, raised above them: transparent and
+/// no-activate, so nothing shows and it never steals focus, and it stays below ordinary windows.
 ///
-/// It paints nothing, lives exactly over the buttons, and only answers WM_LBUTTONDOWN.
-/// Alpha is zero but it is not WS_EX_TRANSPARENT, so it is clickable while invisible.</summary>
+/// It paints nothing, lives exactly over the buttons, and only answers WM_LBUTTONDOWN. Alpha is
+/// zero but it is not WS_EX_TRANSPARENT, so it is clickable while invisible.</summary>
 public sealed class RecordHitWindow : Win32Window
 {
     private const string ClassName = "PrismOSMediaHitTarget";
@@ -24,13 +25,17 @@ public sealed class RecordHitWindow : Win32Window
     private readonly Action<int> _onButton;
     private IReadOnlyList<Rectangle> _buttons = [];
 
-    /// <summary>Child of the wallpaper surface. Cool-down clicks pass to it before the
+    /// <summary>Child of the desktop layer. Cool-down clicks pass to it before the
     /// parent deliberately swallows them.</summary>
     public RecordHitWindow(IntPtr parent, Action<int> onButton)
     {
         _onButton = onButton;
         CreateWindow(ClassName, WS_CHILD | WS_VISIBLE, WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             0, 0, 1, 1, parent);
+        // Top of the parent's child order: above SHELLDLL_DefView, whose clicks would otherwise
+        // reach the desktop list before ours.
+        User32.SetWindowPos(Hwnd, IntPtr.Zero, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
         User32.SetLayeredWindowAttributes(Hwnd, 0, 0, LwaAlpha);
     }
 

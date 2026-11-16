@@ -13,6 +13,12 @@ namespace PrismOS.Widgets;
 /// hot path.</summary>
 public sealed class LoopbackMeter : IDisposable
 {
+    /// <summary>The COM class of the endpoint enumerator. This is <c>CLSID_MMDeviceEnumerator</c>
+    /// (BCDE0395…); A95664D5… is its interface IID, <c>IID_IMMDeviceEnumerator</c>, and asking the
+    /// class factory for that fails with REGDB_E_CLASSNOTREG on every machine — which is how the
+    /// meter ended up silently dead while the code looked plausible.</summary>
+    public static readonly Guid EnumeratorClsid = new("bcde0395-e52f-467c-8e3d-c4579291692e");
+
     private sealed class Run : IDisposable
     {
         public volatile bool Stop;
@@ -86,21 +92,21 @@ public sealed class LoopbackMeter : IDisposable
 
         try
         {
-            var enumType = Type.GetTypeFromCLSID(new Guid("a95664d5-b03a-4c87-8f0b-f0a0db29d185"));
+            var enumType = Type.GetTypeFromCLSID(EnumeratorClsid);
             if (enumType is null) { Log.Warn("Audio meter: CLSID mismatch"); return; }
             var enumerator = (AudioInterop.IMMDeviceEnumerator)Activator.CreateInstance(enumType)!;
-            if (enumerator.GetDefaultAudioEndpoint(AudioInterop.eRender, AudioInterop.eConsole, out AudioInterop.IMMDevice? device) != 0
-                || device is null)
+            int hrEndpoint = enumerator.GetDefaultAudioEndpoint(AudioInterop.eRender, AudioInterop.eConsole, out AudioInterop.IMMDevice? device);
+            if (hrEndpoint != 0 || device is null)
             {
-                Log.Warn("Audio meter: no default render endpoint");
+                Log.Warn($"Audio meter: no default render endpoint ({hrEndpoint:X8})");
                 return;
             }
 
             var activateGuid = AudioInterop.IIDAudioClient;
-            if (device.Activate(ref activateGuid, 23 /* CLSCTX_ALL */, IntPtr.Zero, out object? unknown) != 0
-                || unknown is not AudioInterop.IAudioClient client)
+            int hrActivate = device.Activate(ref activateGuid, 23 /* CLSCTX_ALL */, IntPtr.Zero, out object? unknown);
+            if (hrActivate != 0 || unknown is not AudioInterop.IAudioClient client)
             {
-                Log.Warn("Audio meter: default endpoint would not activate an IAudioClient");
+                Log.Warn($"Audio meter: endpoint Activate failed {hrActivate:X8} ({unknown?.GetType().Name ?? "no object"})");
                 return;
             }
 
@@ -115,15 +121,16 @@ public sealed class LoopbackMeter : IDisposable
             }
 
             var serviceGuid = AudioInterop.IIDCaptureClient;
-            if (client.GetService(ref serviceGuid, out unknown) != 0
-                || unknown is not AudioInterop.IAudioCaptureClient capture)
+            int hrService = client.GetService(ref serviceGuid, out unknown);
+            if (hrService != 0 || unknown is not AudioInterop.IAudioCaptureClient capture)
             {
-                Log.Warn("Audio meter: no IAudioCaptureClient");
+                Log.Warn($"Audio meter: no IAudioCaptureClient ({hrService:X8})");
                 return;
             }
-            if (client.Start() != 0)
+            int hrStart = client.Start();
+            if (hrStart != 0)
             {
-                Log.Warn("Audio meter: Start failed");
+                Log.Warn($"Audio meter: Start failed {hrStart:X8}");
                 return;
             }
 

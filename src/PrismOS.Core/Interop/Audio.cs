@@ -29,13 +29,16 @@ internal static class AudioInterop
     // WAVEFORMATEX.FormatTag for IEEE float
     internal const ushort WaveFormatIeeeFloat = 3;
 
-    internal static readonly Guid IIDAudioClient = new("1cb9a9ac-8dda-4ddb-84f2-04a3fb47a83a");
-    internal static readonly Guid IIDCaptureClient = new("c8cddbfa-66a1-4c9a-b888-0bc26c60d8d0");
+    // These are the published WASAPI interface ids. They must match the interfaces the engine
+    // hands out: a wrong GUID here makes QueryInterface fail with E_NOINTERFACE a few calls into
+    // an otherwise correct capture, and the meter looks dead with nothing but a log line.
+    internal static readonly Guid IIDAudioClient = new("1cb9ad4c-dbfa-4c32-b178-c2f568a703b2");
+    internal static readonly Guid IIDCaptureClient = new("c8adbd64-e71e-48a0-a4de-185c395cd317");
 
-    [ComImport, Guid("bcde0395-e52f-467c-8d64-c46c88630f02")]
+    [ComImport, Guid("bcde0395-e52f-467c-8e3d-c4579291692e")]
     internal class MMDeviceEnumerator { }
 
-    [ComImport, Guid("a95664d5-b03a-4c87-8f0b-f0a0db29d185"),
+    [ComImport, Guid("a95664d2-9614-4f35-a746-de8db63617e6"),
      InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     internal interface IMMDeviceEnumerator
     {
@@ -43,7 +46,7 @@ internal static class AudioInterop
         [PreserveSig] int GetDefaultAudioEndpoint(int dataFlow, int role, out IMMDevice ppEndpoint);
     }
 
-    [ComImport, Guid("0ca2c26a-45f8-11d2-8f07-006097de6400"),
+    [ComImport, Guid("0bd7a1be-7a1a-44db-8397-cc5392387b5e"),
      InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     internal interface IMMDeviceCollection
     {
@@ -51,7 +54,7 @@ internal static class AudioInterop
         [PreserveSig] int Item(uint nDevice, out IMMDevice ppDevice);
     }
 
-    [ComImport, Guid("d666ce8e-f43a-4eb7-8de5-26e70cf45fdb"),
+    [ComImport, Guid("d666063f-1587-4e43-81f1-b948e807363f"),
      InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     internal interface IMMDevice
     {
@@ -62,7 +65,7 @@ internal static class AudioInterop
         [PreserveSig] int GetState(out int pdwState);
     }
 
-    [ComImport, Guid("8e14a747-e679-4f5f-a39f-ed671fdfef09"),
+    [ComImport, Guid("1cb9ad4c-dbfa-4c32-b178-c2f568a703b2"),
      InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     internal interface IAudioClient
     {
@@ -81,7 +84,7 @@ internal static class AudioInterop
         [PreserveSig] int GetService(ref Guid riid, [MarshalAs(UnmanagedType.IUnknown)] out object ppv);
     }
 
-    [ComImport, Guid("c8cddbfa-66a1-4c9a-b888-0bc26c60d8d0"),
+    [ComImport, Guid("c8adbd64-e71e-48a0-a4de-185c395cd317"),
      InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     internal interface IAudioCaptureClient
     {
