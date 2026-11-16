@@ -277,6 +277,7 @@ public sealed partial class NowPlayingSource : IWidgetSource
                 var info = session.GetPlaybackInfo();
                 bool playing = info?.PlaybackStatus ==
                     GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
+                string? aumid = _sourceApp ?? session.SourceAppUserModelId;
                 var props = await session.TryGetMediaPropertiesAsync();
                 var timeline = session.GetTimelineProperties();
                 TimeSpan position = timeline is null ? default : timeline.Position - timeline.StartTime;
@@ -287,7 +288,16 @@ public sealed partial class NowPlayingSource : IWidgetSource
                 // Fetched once per track, off the render path. The cache key deliberately ignores
                 // playing state, so pausing does not throw the artwork away and refetch it.
                 if (reading.TrackId != _artTrackId)
+                {
                     fetchedArt = await LoadArtAsync(props?.Thumbnail);
+                    // A browser playing a short video often publishes no Thumbnail at all. Use the
+                    // source app's icon rather than leaving a generic note glyph in the art box.
+                    fetchedArt ??= MusicArt.ForSource(aumid, FriendlySourceName(aumid));
+                    if (fetchedArt is not null)
+                        Log.Info(props?.Thumbnail is not null
+                            ? "Now playing: art from the media session"
+                            : "Now playing: art from the source app");
+                }
             }
         }
         catch (Exception ex)
