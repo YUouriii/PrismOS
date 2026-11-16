@@ -57,7 +57,7 @@ public sealed class SettingsForm : Form
     private Label? _clockFontSizeCaption;
     private readonly List<ThemeTile> _tiles = [];
     private Label? _styleHint;
-    private Button? _accentSwatch;
+    private ColorChip? _accentSwatch;
     private Label? _accentHex;
 
     // ---- wallpaper page -------------------------------------------------------------------
@@ -71,7 +71,7 @@ public sealed class SettingsForm : Form
     private Panel? _wallpaperCreditHost;
     private Label? _wallpaperCreditCaption;
 
-    private Button _colorButton = null!;
+    private ColorChip _colorButton = null!;
     private Label _colorHex = null!;
 
     public SettingsForm(Engine engine)
@@ -106,7 +106,13 @@ public sealed class SettingsForm : Form
         _preview.Margin = new Padding(0);
 
         var pages = new Panel { Dock = DockStyle.Fill, BackColor = Theme.Colors.Window, AutoScroll = true };
-        var rail = new Panel { Dock = DockStyle.Left, Width = RailWidth, BackColor = Theme.Colors.Window };
+        var rail = new Panel
+        {
+            Dock = DockStyle.Left,
+            Width = RailWidth,
+            BackColor = Theme.Colors.Window,
+            Padding = new Padding(0, 8, 0, 0),
+        };
         _pagesHost = pages;
         _rail = rail;
 
@@ -125,17 +131,14 @@ public sealed class SettingsForm : Form
             Padding = new Padding(20, 12, 20, 12),
             BackColor = Theme.Colors.Window,
         };
-        var close = new Button
+        var close = new TrayButton
         {
             Text = "Close",
             DialogResult = DialogResult.OK,
             Width = 104,
-            Height = 32,
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Colors.Accent,
-            ForeColor = Color.White,
+            Height = 34,
+            Variant = TrayButton.Weight.Primary,
         };
-        close.FlatAppearance.BorderSize = 0;
         footer.Controls.Add(close);
         AcceptButton = close;
 
@@ -146,7 +149,7 @@ public sealed class SettingsForm : Form
         _loading = false;
     }
 
-    private readonly List<(Button Tab, Control Page)> _pages = [];
+    private readonly List<(NavItem Tab, Control Page)> _pages = [];
     private Panel? _pagesHost;
     private Panel? _rail;
 
@@ -208,19 +211,7 @@ public sealed class SettingsForm : Form
         page.Visible = false;
         host.Controls.Add(page);
 
-        var tab = new Button
-        {
-            Text = title,
-            Dock = DockStyle.Top,
-            Height = TabHeight,
-            TextAlign = ContentAlignment.MiddleLeft,
-            Padding = new Padding(14, 0, 0, 0),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Colors.Window,
-            ForeColor = Theme.Colors.Text,
-            Margin = new Padding(0),
-        };
-        tab.FlatAppearance.BorderSize = 0;
+        var tab = new NavItem(title) { Dock = DockStyle.Top, Margin = new Padding(0) };
         int index = _pages.Count;
         tab.Click += (_, _) => SelectPage(index);
 
@@ -237,11 +228,7 @@ public sealed class SettingsForm : Form
         {
             bool active = i == index;
             _pages[i].Page.Visible = active;
-            _pages[i].Tab.BackColor = active ? Theme.Colors.Card : Theme.Colors.Window;
-            _pages[i].Tab.ForeColor = active ? Theme.Colors.Accent : Theme.Colors.Text;
-            // From the form's font, which WinForms rescales per monitor; a fresh 9.5 pt font is sized
-            // for the primary display, so on a 100% monitor the tabs grew 1.5x on the first click.
-            _pages[i].Tab.Font = new Font(Font, active ? FontStyle.Bold : FontStyle.Regular);
+            _pages[i].Tab.Selected = active;
         }
         ResizeToActivePage();
     }
@@ -419,8 +406,7 @@ public sealed class SettingsForm : Form
             BackColor = Theme.Colors.Card,
             Margin = new Padding(0, 2, 0, 2),
         };
-        _accentSwatch = new Button { Width = 58, Height = 26, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 0, 10, 0) };
-        _accentSwatch.FlatAppearance.BorderColor = Theme.Colors.Border;
+        _accentSwatch = new ColorChip { Margin = new Padding(0, 0, 10, 0) };
         _accentHex = new Label
         {
             AutoSize = true,
@@ -428,16 +414,12 @@ public sealed class SettingsForm : Form
             Margin = new Padding(0, 5, 10, 0),
             Font = new Font("Consolas", 9f),
         };
-        var auto = new Button
+        var auto = new TrayButton
         {
             Text = "Auto",
             Width = 66,
             Height = 26,
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Colors.Control,
-            ForeColor = Theme.Colors.Text,
         };
-        auto.FlatAppearance.BorderColor = Theme.Colors.Border;
 
         _accentSwatch.Click += (_, _) =>
         {
@@ -469,7 +451,7 @@ public sealed class SettingsForm : Form
             tile.Selected = tile.Style == theme;
             if (_accent != before) tile.Rerender();
         }
-        if (_accentSwatch is not null) _accentSwatch.BackColor = _accent;
+        if (_accentSwatch is not null) _accentSwatch.Swatch = _accent;
         if (_accentHex is not null)
             _accentHex.Text = $"#{_accent.R:X2}{_accent.G:X2}{_accent.B:X2}  {_accentSource}";
         bool group = WidgetsConfig.IsGroup(theme);
@@ -617,14 +599,7 @@ public sealed class SettingsForm : Form
             Margin = new Padding(0, 2, 0, 2),
         };
 
-        var swatch = new Button
-        {
-            Width = 58,
-            Height = 26,
-            FlatStyle = FlatStyle.Flat,
-            Margin = new Padding(0, 0, 10, 0),
-        };
-        swatch.FlatAppearance.BorderColor = Theme.Colors.Border;
+        var swatch = new ColorChip { Margin = new Padding(0, 0, 10, 0) };
 
         var label = new Label
         {
@@ -634,23 +609,19 @@ public sealed class SettingsForm : Form
             Font = new Font("Consolas", 9f),
         };
 
-        var reset = new Button
+        var reset = new TrayButton
         {
             Text = "Inherit",
             Width = 66,
             Height = 26,
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Colors.Control,
-            ForeColor = Theme.Colors.Text,
             Margin = new Padding(0, 0, 0, 0),
         };
-        reset.FlatAppearance.BorderColor = Theme.Colors.Border;
 
         void Sync()
         {
             bool inherited = string.IsNullOrWhiteSpace(_config.Clock.DateColor);
             var effective = Widgets.ClockRenderer.DateColorFor(_config.Clock, Widgets.ClockRenderer.ParseColor(_config.Clock.Color));
-            swatch.BackColor = Color.FromArgb(255, effective.R, effective.G, effective.B);
+            swatch.Swatch = Color.FromArgb(255, effective.R, effective.G, effective.B);
             label.Text = inherited ? "inherited" : _config.Clock.DateColor!.ToUpperInvariant();
             reset.Enabled = !inherited;
         }
@@ -850,8 +821,7 @@ public sealed class SettingsForm : Form
             Margin = new Padding(0, 2, 0, 2),
         };
 
-        var button = new Button { Width = 58, Height = 26, FlatStyle = FlatStyle.Flat, Margin = new Padding(0, 0, 10, 0) };
-        button.FlatAppearance.BorderColor = Theme.Colors.Border;
+        var button = new ColorChip { Margin = new Padding(0, 0, 10, 0) };
 
         var hex = new Label
         {
@@ -865,7 +835,7 @@ public sealed class SettingsForm : Form
         void Refresh()
         {
             var current = ClockRenderer.ParseColor(get());
-            button.BackColor = Color.FromArgb(current.R, current.G, current.B);
+            button.Swatch = Color.FromArgb(current.R, current.G, current.B);
             hex.Text = get().ToUpperInvariant();
         }
 
@@ -988,15 +958,7 @@ public sealed class SettingsForm : Form
     /// clock's picker harder to follow for no gain here.</summary>
     private Control BuildInfoColorPicker()
     {
-        var button = new Button
-        {
-            Width = 58,
-            Height = 26,
-            BackColor = InfoRgb(),
-            FlatStyle = FlatStyle.Flat,
-            Margin = new Padding(0, 0, 10, 0),
-        };
-        button.FlatAppearance.BorderColor = Theme.Colors.Border;
+        var button = new ColorChip { Swatch = InfoRgb(), Margin = new Padding(0, 0, 10, 0) };
 
         var hex = new Label
         {
@@ -1012,7 +974,7 @@ public sealed class SettingsForm : Form
         {
             if (PickColor(InfoColor(), allowAlpha: true) is not { } picked) return;
             SetInfoColor(picked, picked.A);
-            button.BackColor = Color.FromArgb(picked.R, picked.G, picked.B);
+            button.Swatch = Color.FromArgb(picked.R, picked.G, picked.B);
             hex.Text = _config.Info.Color.ToUpperInvariant();
             ApplyInfo();
         };
@@ -1072,29 +1034,21 @@ public sealed class SettingsForm : Form
             BackColor = Theme.Colors.Card,
             Margin = new Padding(0, 2, 0, 2),
         };
-        var browse = new Button
+        var browse = new TrayButton
         {
             Text = "Browse…",
             Width = 96,
             Height = 28,
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Colors.Control,
-            ForeColor = Theme.Colors.Text,
             Margin = new Padding(0, 0, 8, 0),
         };
-        browse.FlatAppearance.BorderColor = Theme.Colors.Border;
         browse.Click += (_, _) => BrowseForWallpaper();
 
-        var gallery = new Button
+        var gallery = new TrayButton
         {
             Text = "Gallery…",
             Width = 96,
             Height = 28,
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Colors.Control,
-            ForeColor = Theme.Colors.Text,
         };
-        gallery.FlatAppearance.BorderColor = Theme.Colors.Border;
         gallery.Click += (_, _) => OpenGallery();
 
         actions.Controls.Add(browse);
@@ -1262,16 +1216,12 @@ public sealed class SettingsForm : Form
         rows.AddRow("Wake-up transition", Check(_config.Widgets.WakeTransition, v => { _config.Widgets.WakeTransition = v; _engine.SaveConfig(); }));
         rows.AddRow("Start with Windows", Check(Autostart.IsEnabled(), Autostart.SetEnabled));
 
-        var reset = new Button
+        var reset = new TrayButton
         {
             Text = "Reset to defaults",
             Width = 140,
             Height = 28,
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Colors.Control,
-            ForeColor = Theme.Colors.Text,
         };
-        reset.FlatAppearance.BorderColor = Theme.Colors.Border;
         reset.Click += (_, _) => ConfirmAndReset();
         rows.AddRow("Reset", reset);
 
@@ -1308,6 +1258,17 @@ public sealed class SettingsForm : Form
     {
         var (card, rows) = NewSection("About PrismOS");
 
+        var mark = new PictureBox
+        {
+            Image = PrismIcon.ToBitmap(44),
+            Size = new Size(44, 44),
+            SizeMode = PictureBoxSizeMode.Zoom,
+            BackColor = Theme.Colors.Card,
+            Margin = new Padding(0, 0, 0, 10),
+        };
+        card.Controls.Add(mark);
+        card.Controls.SetChildIndex(mark, 1);
+
         var version = UpdateCheck.CurrentVersion();
         rows.AddRow("Version", TextValue($"{version} · .NET {Environment.Version.Major}.{Environment.Version.Minor}"));
 
@@ -1324,16 +1285,12 @@ public sealed class SettingsForm : Form
             ForeColor = Theme.Colors.Subtle,
             Margin = new Padding(8, 6, 0, 0),
         };
-        var check = new Button
+        var check = new TrayButton
         {
             Text = "Check for updates",
             Width = 140,
             Height = 28,
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Colors.Control,
-            ForeColor = Theme.Colors.Text,
         };
-        check.FlatAppearance.BorderColor = Theme.Colors.Border;
         check.Click += async (_, _) => await CheckForUpdatesAsync(check, status);
 
         var row = new FlowLayoutPanel
@@ -1358,16 +1315,12 @@ public sealed class SettingsForm : Form
             BackColor = Theme.Colors.Card,
             Margin = new Padding(0, 2, 0, 2),
         };
-        var openConfig = new Button
+        var openConfig = new TrayButton
         {
             Text = "Open config file",
             AutoSize = true,
             Height = 28,
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Colors.Control,
-            ForeColor = Theme.Colors.Text,
         };
-        openConfig.FlatAppearance.BorderColor = Theme.Colors.Border;
         openConfig.Click += (_, _) =>
         {
             try
@@ -1377,16 +1330,12 @@ public sealed class SettingsForm : Form
             }
             catch (Exception ex) { Common.Log.Warn($"Could not open the config file: {ex.Message}"); }
         };
-        var diagnostics = new Button
+        var diagnostics = new TrayButton
         {
             Text = "Diagnostics",
             AutoSize = true,
             Height = 28,
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Colors.Control,
-            ForeColor = Theme.Colors.Text,
         };
-        diagnostics.FlatAppearance.BorderColor = Theme.Colors.Border;
         diagnostics.Click += (_, _) =>
             User32.MessageBoxW(Handle, _engine.Diagnostics(), "PrismOS diagnostics", 0x40 /* MB_ICONINFORMATION */);
         aux.Controls.Add(openConfig);
@@ -1491,7 +1440,7 @@ public sealed class SettingsForm : Form
 
         foreach (var anchor in Enum.GetValues<ClockAnchor>())
         {
-            var cell = new RadioButton
+            var cell = new RoundRadio
             {
                 Appearance = Appearance.Button,
                 Size = new Size(38, 30),
@@ -1604,20 +1553,16 @@ public sealed class SettingsForm : Form
             Margin = new Padding(0, 2, 0, 2),
         };
 
-        _colorButton = new Button
+        _colorButton = new ColorChip
         {
-            Width = 58,
-            Height = 26,
-            BackColor = CurrentRgb(),
-            FlatStyle = FlatStyle.Flat,
+            Swatch = CurrentRgb(),
             Margin = new Padding(0, 0, 10, 0),
         };
-        _colorButton.FlatAppearance.BorderColor = Theme.Colors.Border;
         _colorButton.Click += (_, _) =>
         {
             if (PickColor(CurrentColor(), allowAlpha: true) is not { } picked) return;
             SetColor(picked, picked.A);
-            _colorButton.BackColor = Color.FromArgb(picked.R, picked.G, picked.B);
+            _colorButton.Swatch = Color.FromArgb(picked.R, picked.G, picked.B);
             UpdateColorLabel();
             ApplyClock();
         };
@@ -1642,12 +1587,11 @@ public sealed class SettingsForm : Form
     {
         // Nested TableLayoutPanels only — Dock + AutoSize + FlowLayoutPanel together produce
         // zero-height cards here.
-        var card = new TableLayoutPanel
+        var card = new RoundedCard
         {
             ColumnCount = 1,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            BackColor = Theme.Colors.Card,
             Padding = new Padding(16, 12, 16, 14),
             Margin = new Padding(0, 0, 0, 14),
         };
@@ -1721,21 +1665,22 @@ public sealed class SettingsForm : Form
         }
     }
 
-    private CheckBox Check(bool value, Action<bool> onChange)
+    private Switch Check(bool value, Action<bool> onChange)
     {
-        var check = new CheckBox
+        var toggle = new Switch
         {
-            Text = "",
             Checked = value,
-            AutoSize = true,
             Margin = new Padding(0, 5, 0, 5),
-            ForeColor = Theme.Colors.Text,
-            BackColor = Theme.Colors.Card,
-            FlatStyle = FlatStyle.Flat,
         };
-        check.FlatAppearance.BorderColor = Theme.Colors.Border;
-        check.CheckedChanged += (_, _) => { if (!_loading) onChange(check.Checked); };
-        return check;
+        toggle.CheckedChanged += (_, _) => { if (!_loading) onChange(toggle.Checked); };
+        // A control built after the window was laid out is not rescaled with it; match the DPI the
+        // window currently reports so a toggle is the same physical size as its caption.
+        if (IsHandleCreated && DeviceDpi != _layoutDpi)
+        {
+            float scale = (float)DeviceDpi / _layoutDpi;
+            toggle.Scale(new SizeF(scale, scale));
+        }
+        return toggle;
     }
 
     private ComboBox Choice(string[] items, int selected, Action<int> onChange)

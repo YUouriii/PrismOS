@@ -72,17 +72,13 @@ public sealed class GalleryForm : Form
             Padding = new Padding(16, 12, 16, 12),
             BackColor = Theme.Colors.Window,
         };
-        var close = new Button
+        var close = new TrayButton
         {
             Text = "Close",
             DialogResult = DialogResult.Cancel,
             Width = 100,
             Height = 32,
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Colors.Control,
-            ForeColor = Theme.Colors.Text,
         };
-        close.FlatAppearance.BorderColor = Theme.Colors.Border;
         _footer.Controls.Add(close);
         CancelButton = close;
 
@@ -195,16 +191,13 @@ internal sealed class GalleryRow : Panel
             BackColor = Theme.Colors.Card,
         };
 
-        _use = new Button
+        _use = new TrayButton
         {
             Text = downloaded ? "Use" : "Download",
             Width = 100,
             Height = 30,
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Colors.Accent,
-            ForeColor = Color.White,
+            Variant = TrayButton.Weight.Primary,
         };
-        _use.FlatAppearance.BorderSize = 0;
         _use.Click += async (_, _) =>
         {
             if (Use is null) return;

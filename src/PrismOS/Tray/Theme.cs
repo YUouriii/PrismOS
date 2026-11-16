@@ -7,7 +7,8 @@ namespace PrismOS.Tray;
 
 public sealed record Palette(
     Color Window, Color Card, Color Border, Color Text,
-    Color Subtle, Color Accent, Color Control, Color Preview);
+    Color Subtle, Color Accent, Color Control, Color Preview,
+    Color Hover, Color AccentSoft, Color Track);
 
 /// <summary>Follows the Windows app-theme setting so the settings panel doesn't flashbang anyone
 /// running a dark desktop — which, for a live-wallpaper app, is most people.</summary>
@@ -29,7 +30,10 @@ public static class Theme
             Subtle: Color.FromArgb(0x9B, 0x9B, 0x9B),
             Accent: Color.FromArgb(0x4C, 0x9A, 0xFF),
             Control: Color.FromArgb(0x38, 0x38, 0x38),
-            Preview: Color.FromArgb(0x14, 0x16, 0x1A))
+            Preview: Color.FromArgb(0x14, 0x16, 0x1A),
+            Hover: Color.FromArgb(0x42, 0x42, 0x42),
+            AccentSoft: Color.FromArgb(0x38, 0x4C, 0x9A, 0xFF),
+            Track: Color.FromArgb(0x4A, 0x4A, 0x4A))
         : new Palette(
             Window: Color.FromArgb(0xF3, 0xF3, 0xF3),
             Card: Color.White,
@@ -38,7 +42,10 @@ public static class Theme
             Subtle: Color.FromArgb(0x60, 0x60, 0x60),
             Accent: Color.FromArgb(0x00, 0x5F, 0xB8),
             Control: Color.White,
-            Preview: Color.FromArgb(0x24, 0x26, 0x2B));
+            Preview: Color.FromArgb(0x24, 0x26, 0x2B),
+            Hover: Color.FromArgb(0xEC, 0xEC, 0xEC),
+            AccentSoft: Color.FromArgb(0x24, 0x00, 0x5F, 0xB8),
+            Track: Color.FromArgb(0xC4, 0xC4, 0xC4));
 
     private static int AppsUseLightTheme()
     {

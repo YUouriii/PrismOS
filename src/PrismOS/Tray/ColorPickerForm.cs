@@ -87,30 +87,23 @@ public sealed class ColorPickerForm : Form
         var newLabel = Caption("New", 20, 402);
         var oldLabel = Caption("Original", 92, 402);
 
-        var ok = new Button
+        var ok = new TrayButton
         {
             Text = "OK",
             DialogResult = DialogResult.OK,
             Location = new Point(502, 414),
             Size = new Size(96, 32),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Colors.Accent,
-            ForeColor = Color.White,
+            Variant = TrayButton.Weight.Primary,
         };
-        ok.FlatAppearance.BorderSize = 0;
         ok.Click += (_, _) => SelectedColor = CurrentFromControls();
 
-        var cancel = new Button
+        var cancel = new TrayButton
         {
             Text = "Cancel",
             DialogResult = DialogResult.Cancel,
             Location = new Point(398, 414),
             Size = new Size(96, 32),
-            FlatStyle = FlatStyle.Flat,
-            BackColor = Theme.Colors.Control,
-            ForeColor = Theme.Colors.Text,
         };
-        cancel.FlatAppearance.BorderColor = Theme.Colors.Border;
 
         Controls.AddRange([
             _sv, _hue, _alpha, _preview, _originalPreview,

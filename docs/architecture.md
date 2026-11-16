@@ -52,6 +52,8 @@ The widgets are event-driven with one deliberate exception. The clock re-arms a 
 
 Everything in the render path is raw Win32 + DirectX with no UI framework. The one place a UI toolkit earns its weight is the settings window, so it is a **WinForms `Form` loaded only when opened** (`Tray/SettingsForm.cs`) — the wallpaper pipeline never references it, and closing it frees it. Every control writes straight into the live `AppConfig` and calls back into the engine (`RefreshClock` / `RefreshWallpapers` / `ApplyAudioSettings`), so changes preview instantly. Because renderer swaps reuse the existing window and composition host, changing the fit mode or picking a new wallpaper never flashes the shell wallpaper underneath and never blinks the clock.
 
+The panel's look is painted rather than themed: `Tray/Ui/` holds the rounded card, the toggle, the rail pill, the colour chip and the rounded button. Stock WinForms controls have square corners and a tick box, and the panel is the only surface a person spends time in — so the few shapes that matter are drawn by `UiPaint` instead of themed one property at a time.
+
 ### Self-healing
 
 The wallpaper layer is volatile: explorer restarts, the shell destroys/recreates its WorkerW (notably, `SPI_SETDESKWALLPAPER` destroys it on the raised topology — so PrismOS only issues the desktop refresh on final exit, to restore the user's original wallpaper). `DesktopLayerHost` watches for `EVENT_OBJECT_DESTROY` on the layer via a WinEvent hook and for the `TaskbarCreated` broadcast, then re-probes and re-attaches everything. Session unlock re-validates cached handles.
