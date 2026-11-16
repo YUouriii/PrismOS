@@ -77,6 +77,8 @@ public sealed partial class NowPlayingSource : IWidgetSource
     private bool _disposed;
 
     private NowPlayingReading _current;
+    private double _lastProgress, _lastDuration;
+    private long _lastProgressAt;
     private Bitmap? _art;
     private string? _artTrackId;
     private string? _sourceApp;
@@ -86,7 +88,21 @@ public sealed partial class NowPlayingSource : IWidgetSource
     public string? SourceApp =>
         _sourceApp ??= _session?.SourceAppUserModelId;
 
-    public NowPlayingReading Current => _current;
+    /// <summary>The current track. When the session reports a duration but updates its timeline
+    /// rarely — browsers and video players often do — the progress is carried forward with the
+    /// wall clock between reads, so the line moves continuously instead of sitting at zero and
+    /// jumping on the next event. Record identity never changes, so artwork is not refetched.</summary>
+    public NowPlayingReading Current
+    {
+        get
+        {
+            if (!_current.IsPlaying || _lastDuration <= 0d) return _current;
+            double elapsed = (Environment.TickCount64 - _lastProgressAt) / 1000.0;
+            double progress = Math.Clamp(_lastProgress + elapsed / _lastDuration, 0d, 1d);
+            return _current with { Progress = progress };
+        }
+    }
+
     public Bitmap? Art => _art;
 
     /// <summary>Media transport the buttons drive. Fire-and-forget: the buttons are paint, and
@@ -245,6 +261,7 @@ public sealed partial class NowPlayingSource : IWidgetSource
 
         string? next = null;
         NowPlayingReading reading = default;
+        TimeSpan timelineDuration = default;
         Bitmap? fetchedArt = null;
         try
         {
@@ -256,10 +273,10 @@ public sealed partial class NowPlayingSource : IWidgetSource
                     GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing;
                 var props = await session.TryGetMediaPropertiesAsync();
                 var timeline = session.GetTimelineProperties();
+                TimeSpan position = timeline is null ? default : timeline.Position - timeline.StartTime;
+                timelineDuration = timeline is null ? default : timeline.EndTime - timeline.StartTime;
                 next = Format(props?.Title, props?.Artist, playing, _maxCharacters());
-                reading = Read(props?.Title, props?.Artist, playing,
-                               timeline is null ? default : timeline.Position - timeline.StartTime,
-                               timeline is null ? default : timeline.EndTime - timeline.StartTime);
+                reading = Read(props?.Title, props?.Artist, playing, position, timelineDuration);
 
                 // Fetched once per track, off the render path. The cache key deliberately ignores
                 // playing state, so pausing does not throw the artwork away and refetch it.
@@ -299,10 +316,22 @@ public sealed partial class NowPlayingSource : IWidgetSource
             // Compare the reading as well as the text: the record redraws when the artwork or the
             // playing state moves, neither of which necessarily changes a single character.
             bool progressStarted = reading.Progress > 0.001d && _current.Progress <= 0.001d;
+            if (timelineDuration > TimeSpan.Zero)
+            {
+                _lastProgress = reading.Progress;
+                _lastDuration = timelineDuration.TotalSeconds;
+                _lastProgressAt = Environment.TickCount64;
+            }
+            else if (trackChanged)
+            {
+                _lastDuration = 0d;
+                _lastProgress = 0d;
+            }
             if (!trackChanged && next == _value && reading == _current) return;
             _value = next;
             _current = reading;
-            if (progressStarted) Log.Info($"Now playing: progress {reading.Progress:0.00}");
+            if (progressStarted)
+                Log.Info($"Now playing: progress {reading.Progress:0.00} of {timelineDuration.TotalSeconds:0.0}s");
             Changed?.Invoke();
         });
     }
