@@ -238,6 +238,10 @@ public sealed class CompositionSurface : IComposedOverlay
     private readonly CompositionHost _host;
     private readonly bool _premultiplied;
     private ID2D1RenderTarget? _d2dTarget;
+    /// <summary>The last CPU-pixel upload target, reused while the size holds. Creating and
+    /// disposing one per frame (30 fps × several widgets) churned GPU allocations for no gain.</summary>
+    private ID2D1Bitmap? _d2dBitmap;
+    private int _d2dWidth, _d2dHeight;
 
     public IDXGISwapChain1 SwapChain { get; private set; }
     public ID3D11Texture2D BackBuffer { get; private set; }
@@ -325,12 +329,22 @@ public sealed class CompositionSurface : IComposedOverlay
             System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
         try
         {
-            using var d2dBitmap = _d2dTarget.CreateBitmap(
-                new SizeI(bitmap.Width, bitmap.Height), bits.Scan0, (uint)bits.Stride,
-                new BitmapProperties(new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied)));
+            if (_d2dBitmap is null || _d2dWidth != bitmap.Width || _d2dHeight != bitmap.Height)
+            {
+                _d2dBitmap?.Dispose();
+                _d2dBitmap = _d2dTarget.CreateBitmap(
+                    new SizeI(bitmap.Width, bitmap.Height), bits.Scan0, (uint)bits.Stride,
+                    new BitmapProperties(new Vortice.DCommon.PixelFormat(Format.B8G8R8A8_UNorm, Vortice.DCommon.AlphaMode.Premultiplied)));
+                _d2dWidth = bitmap.Width;
+                _d2dHeight = bitmap.Height;
+            }
+            else
+            {
+                _d2dBitmap.CopyFromMemory(bits.Scan0, (uint)bits.Stride);
+            }
             _d2dTarget.BeginDraw();
             _d2dTarget.Clear(new Color4(0f, 0f, 0f, 0f));
-            _d2dTarget.DrawBitmap(d2dBitmap, new Rect(0, 0, Width, Height), 1f, Vortice.Direct2D1.BitmapInterpolationMode.Linear, null);
+            _d2dTarget.DrawBitmap(_d2dBitmap, new Rect(0, 0, Width, Height), 1f, Vortice.Direct2D1.BitmapInterpolationMode.Linear, null);
             _d2dTarget.EndDraw();
         }
         finally
@@ -398,6 +412,8 @@ public sealed class CompositionSurface : IComposedOverlay
 
     public void Dispose()
     {
+        _d2dBitmap?.Dispose();
+        _d2dBitmap = null;
         _d2dTarget?.Dispose();
         _d2dTarget = null;
         try

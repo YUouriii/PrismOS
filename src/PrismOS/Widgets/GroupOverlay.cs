@@ -31,6 +31,9 @@ public sealed class GroupOverlay : IDisposable
         public required Rectangle FaceBox;
         /// <summary>What was last presented, so an unchanged panel is not re-shadowed each tick.</summary>
         public byte[]? Content;
+        /// <summary>Reused paint target. The meter repaints this panel 30 times a second; a fresh
+        /// bitmap each tick (most are over the large-object threshold) made the process grow.</summary>
+        public Bitmap? Surface;
     }
 
     private readonly CompositionHost _host;
@@ -54,6 +57,7 @@ public sealed class GroupOverlay : IDisposable
     private bool _covered;
 
     private Bitmap? _face;
+    private Bitmap? _faceSurface;
     private string? _faceTrackId;
     private bool _faceHasArt;
     private (string? Track, bool Art, bool Playing, int Side)? _presentedFace;
@@ -198,9 +202,15 @@ public sealed class GroupOverlay : IDisposable
                 if (stripOnly && !panel.HasStrip) continue;
                 layers.Group.SetOffset(panel.Bounds.X, panel.Bounds.Y);
 
-                using var bmp = new Bitmap(panel.Bounds.Width, panel.Bounds.Height, PixelFormat.Format32bppPArgb);
+                var bmp = layers.Surface;
+                if (bmp is null || bmp.Width != panel.Bounds.Width || bmp.Height != panel.Bounds.Height)
+                {
+                    bmp?.Dispose();
+                    bmp = layers.Surface = new Bitmap(panel.Bounds.Width, panel.Bounds.Height, PixelFormat.Format32bppPArgb);
+                }
                 using (var g = Graphics.FromImage(bmp))
                 {
+                    g.Clear(Color.Transparent);
                     // The frost under the cards: the blurred wallpaper, clipped to them.
                     if (_config.Widgets.Blur && panel.CardRegions is { Count: > 0 }
                         && _backdrop?.Invoke(_monitor) is { } stillPath && File.Exists(stillPath))
@@ -273,6 +283,8 @@ public sealed class GroupOverlay : IDisposable
     private void DropPanel(string key)
     {
         if (!_panels.Remove(key, out var layers)) return;
+        layers.Surface?.Dispose();
+        layers.Surface = null;
         if (ReferenceEquals(layers.Face, _faceLayer)) DropFace();
         try { _host.RemoveOverlay(KeyPrefix + key); } catch { /* host may already be gone */ }
     }
@@ -311,11 +323,18 @@ public sealed class GroupOverlay : IDisposable
     private void PaintFace(CompositionSurface layer, bool playing)
     {
         if (_face is null) return;
-        using var bmp = new Bitmap(_face.Width, _face.Height, PixelFormat.Format32bppPArgb);
-        using (var g = Graphics.FromImage(bmp))
-            DiscRenderer.PaintFace(g, new Rectangle(0, 0, bmp.Width, bmp.Height), _face,
+        if (_faceSurface is null || _faceSurface.Width != _face.Width || _faceSurface.Height != _face.Height)
+        {
+            _faceSurface?.Dispose();
+            _faceSurface = new Bitmap(_face.Width, _face.Height, PixelFormat.Format32bppPArgb);
+        }
+        using (var g = Graphics.FromImage(_faceSurface))
+        {
+            g.Clear(Color.Transparent);
+            DiscRenderer.PaintFace(g, new Rectangle(0, 0, _faceSurface.Width, _faceSurface.Height), _face,
                                    _turns, playing);
-        layer.PresentBitmap(bmp);
+        }
+        layer.PresentBitmap(_faceSurface);
     }
 
     // ---- the record's turn ---------------------------------------------------------------------
@@ -410,6 +429,8 @@ public sealed class GroupOverlay : IDisposable
             foreach (var key in _panels.Keys.ToList()) DropPanel(key);
             _face?.Dispose();
             _face = null;
+            _faceSurface?.Dispose();
+            _faceSurface = null;
         }
     }
 }

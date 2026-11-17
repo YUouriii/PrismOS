@@ -7,26 +7,52 @@ namespace PrismOS.Tray;
 /// <summary>CPU-decoded, looping video for the settings panel preview.
 ///
 /// Decoded entirely through the software Media Foundation path: MF is started, the source
-/// reader is told to bypass DXVA (SourceReaderAttributeKeys.DisableDxva) and to insert its
-/// software video processor so the H.264/HEVC payloads go to the CPU, and frames arrive as
-/// RGB32 system memory. No D3D device, no DirectComposition visuals, nothing associates the
+/// reader is told to bypass DXVA (SourceReaderAttributeKeys.DisableDxva), and frames arrive as
+/// NV12 system memory which this class converts and downscales itself. No D3D device, no DirectComposition visuals, nothing associates the
 /// process with the GPU — which is the only reliable way to keep the NVIDIA App overlay from
 /// flagging the preview.
 ///
-/// The decode runs on a background thread at native size (the software video processor
-/// refuses scaled requests outright); frames reach the panel as RGB32 bitmaps and GDI+
-/// downscales them on paint. The UI thread never sees a Media Foundation call.</summary>
+/// The decode runs on a background thread. Frames are copied into one reusable byte buffer, so a
+/// looping preview allocates nothing per frame; the panel keeps a single bitmap and asks for the
+/// pixels on paint. (The previous version handed out a fresh 854×480 bitmap per decoded frame —
+/// ~1.6 MB, over the large-object threshold, thirty times a second — which is what made opening
+/// the wallpaper page balloon the working set.) The UI thread never sees a Media Foundation call.
+///
+/// Scaling is deliberately *not* left to the reader's video processor: asking it for RGB32 at the
+/// preview's size makes Media Foundation keep a full-resolution surface pool (and the processor's
+/// own device) alive for as long as the reader lives — a couple of hundred megabytes on a 1080p
+/// or 4K file. Taking the decoder's native NV12 and shrinking it here costs a few milliseconds a
+/// frame and holds nothing bigger than one decoded frame.</summary>
 public sealed class CpuVideoDecoder : IDisposable
 {
+    /// <summary>MFVideoFormat_NV12 (FourCC 'NV12'), the software decoders' native output.</summary>
+    private static readonly Guid Nv12Subtype = new(0x3231564E, 0x0000, 0x0010,
+        0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71);
+
     private readonly string _path;
     private readonly Thread _thread;
     private readonly CancellationTokenSource _stop = new();
     private volatile bool _paused;
     private readonly Lock _gate = new();
 
-    private Bitmap? _frame;
+    /// <summary>The latest decoded frame, BGRX, rows tightly packed. Written by the decode thread
+    /// and copied out under <see cref="_frameGate"/>; only that buffer is shared.</summary>
+    private readonly Lock _frameGate = new();
+    private byte[]? _pixels;
+    private long _nextCopy;
     private int _width = -1, _height = -1;
+    /// <summary>True when the reader hands out native-size NV12 instead of RGB32 at the preview
+    /// size (the normal case; only a decoder that refuses NV12 falls back to the processor).</summary>
+    private bool _nv12;
+    private int _srcWidth, _srcHeight;
+    /// <summary>Source column/row ranges per output pixel, computed once per size. A 3×3 box per
+    /// pixel at 640×360 is what keeps the shrink from aliasing.</summary>
+    private int[]? _cols, _rows;
     private bool _started;
+
+    /// <summary>Preview frames per second. A 30 fps source is decoded in full but the pixels are
+    /// copied at this rate: the panel is 444 px wide, so anything above this is invisible work.</summary>
+    private const int PreviewFps = 24;
 
     public event Action? FrameReady;
 
@@ -53,13 +79,56 @@ public sealed class CpuVideoDecoder : IDisposable
     public void Pause() => _paused = true;
     public void Resume() => _paused = false;
 
-    /// <summary>A private copy of the latest frame, or null before the first one lands.
-    /// The caller owns the copy — the decode thread swaps and disposes frames as it goes,
-    /// so handing out the internal bitmap would let it be disposed mid-draw.</summary>
-    public Bitmap? GetFrame()
+    /// <summary>The decoded size, valid once the first frame lands.</summary>
+    public int Width
     {
-        var current = Volatile.Read(ref _frame);
-        return current is null ? null : new Bitmap(current);
+        get { lock (_frameGate) return _pixels is null ? 0 : _width; }
+    }
+
+    public int Height
+    {
+        get { lock (_frameGate) return _pixels is null ? 0 : _height; }
+    }
+
+    /// <summary>Copies the latest frame into <paramref name="destination"/>, which must be the
+    /// decoder's size and <c>Format32bppRgb</c>. False before the first frame (or after an error),
+    /// in which case the caller draws its placeholder.</summary>
+    public bool TryCopyFrame(Bitmap destination)
+    {
+        lock (_frameGate)
+        {
+            if (_pixels is null || destination.Width != _width || destination.Height != _height)
+                return false;
+
+            var rect = new Rectangle(0, 0, _width, _height);
+            var bits = destination.LockBits(rect, System.Drawing.Imaging.ImageLockMode.WriteOnly,
+                System.Drawing.Imaging.PixelFormat.Format32bppRgb);
+            try
+            {
+                unsafe
+                {
+                    fixed (byte* src = _pixels)
+                    {
+                        byte* dst = (byte*)bits.Scan0.ToPointer();
+                        int rowBytes = _width * 4;
+                        if (bits.Stride == rowBytes)
+                        {
+                            Buffer.MemoryCopy(src, dst, (long)rowBytes * _height, (long)rowBytes * _height);
+                        }
+                        else
+                        {
+                            for (int y = 0; y < _height; y++)
+                                Buffer.MemoryCopy(src + (long)y * rowBytes, dst + (long)y * bits.Stride, rowBytes, rowBytes);
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                destination.UnlockBits(bits);
+            }
+            return true;
+        }
     }
 
     private void DecodeLoop()
@@ -88,12 +157,13 @@ public sealed class CpuVideoDecoder : IDisposable
                 long durationHns = sample.SampleDuration;
                 using (sample)
                 {
-                    var bitmap = ToBitmap(sample);
-                    if (bitmap is not null)
+                    // Only copy at the preview rate: decoding continues at the file's rate so the
+                    // loop timing stays right, but the panel never needs every frame.
+                    long now = Environment.TickCount64;
+                    if (now >= _nextCopy)
                     {
-                        var previous = Interlocked.Exchange(ref _frame, bitmap);
-                        previous?.Dispose();
-                        FrameReady?.Invoke();
+                        _nextCopy = now + 1000 / PreviewFps;
+                        if (CopySample(sample)) FrameReady?.Invoke();
                     }
                 }
 
@@ -109,41 +179,96 @@ public sealed class CpuVideoDecoder : IDisposable
         }
     }
 
-    /// <summary>Opens the file as an RGB32 software-decoded source, scaled down for the panel.
-    /// Returns null (with <see cref="Error"/> set) for anything unsupported.</summary>
+    /// <summary>Opens the file for software decode. First choice is the decoder's own NV12 at the
+    /// file's size (see the class note); a file whose decoder refuses NV12 falls back to the
+    /// video processor, which does the scale instead. Returns null with <see cref="Error"/> set
+    /// for anything unsupported.</summary>
     private IMFSourceReader? OpenReader(string path)
+    {
+        if (TryOpen(path, scaled: false) is { } plain) return plain;
+        if (Error is not null) return null;
+        Log.Info($"CPU preview: {Path.GetFileName(path)} needs the video processor for scaling");
+        return TryOpen(path, scaled: true);
+    }
+
+    private IMFSourceReader? TryOpen(string path, bool scaled)
     {
         using var attributes = MediaFactory.MFCreateAttributes(4);
         attributes.Set(SourceReaderAttributeKeys.DisableDxva, true);
-        // The plain video processor rejects every scaled frame size with MF_E_INVALIDMEDIATYPE,
-        // but the advanced one scales into RGB32 fine — that is what keeps this at 480p on CPU.
-        attributes.Set(SourceReaderAttributeKeys.EnableAdvancedVideoProcessing, true);
+        // Only the advanced processor scales; it is also the expensive one, so it is the fallback.
+        if (scaled) attributes.Set(SourceReaderAttributeKeys.EnableAdvancedVideoProcessing, true);
 
         var reader = MediaFactory.MFCreateSourceReaderFromURL(path, attributes);
-        var native = reader.GetNativeMediaType((int)SourceReaderIndex.FirstVideoStream, 0);
-        ulong packedSize = native.GetUInt64(MediaTypeAttributeKeys.FrameSize);
-        uint width = (uint)(packedSize >> 32);
-        uint height = (uint)(packedSize & 0xFFFFFFFF);
-        native.Dispose();
+        try
+        {
+            using var native = reader.GetNativeMediaType((int)SourceReaderIndex.FirstVideoStream, 0);
+            ulong packedSize = native.GetUInt64(MediaTypeAttributeKeys.FrameSize);
+            uint srcWidth = (uint)(packedSize >> 32);
+            uint srcHeight = (uint)(packedSize & 0xFFFFFFFF);
+            if (srcWidth < 2 || srcHeight < 2) throw new InvalidOperationException("unknown frame size");
 
-        // 480p software preview: the advanced video processor scales into RGB32 for us,
-        // halving the pixel count (and the work) against the native 1080p decode.
-        double scale = Math.Min(1.0, Math.Min(854.0 / Math.Max(width, 1), 480.0 / Math.Max(height, 1)));
-        _width = Math.Max(2, (int)Math.Round(width * scale) & ~1);
-        _height = Math.Max(2, (int)Math.Round(height * scale) & ~1);
+            // 640×360 at most: the panel is 444 px wide at 100 % DPI, so anything larger is wasted.
+            double scale = Math.Min(1.0, Math.Min(640.0 / srcWidth, 360.0 / srcHeight));
+            _width = Math.Max(2, (int)Math.Round(srcWidth * scale) & ~1);
+            _height = Math.Max(2, (int)Math.Round(srcHeight * scale) & ~1);
+            _srcWidth = (int)srcWidth;
+            _srcHeight = (int)srcHeight;
 
-        using var outType = MediaFactory.MFCreateMediaType();
-        outType.Set(MediaTypeAttributeKeys.MajorType, MediaTypeGuids.Video);
-        outType.Set(MediaTypeAttributeKeys.Subtype, VideoFormatGuids.Rgb32);
-        outType.Set(MediaTypeAttributeKeys.FrameSize, MediaFactory.PackSize((uint)_width, (uint)_height));
-        outType.Set(MediaTypeAttributeKeys.FrameRate, MediaFactory.PackRatio(30, 1));
-        outType.Set(MediaTypeAttributeKeys.DefaultStride, (ulong)(_width * 4));
-        reader.SetCurrentMediaType((int)SourceReaderIndex.FirstVideoStream, outType);
-        // Don't assume stream 1 is audio — a 4K file can lead with a data or subtitle track and
-        // have no audio at all, and unselecting a non-existent stream fails with
-        // MF_E_INVALIDSTREAMNUMBER. Walk every stream instead and disable anything not video.
-        DisableNonVideoStreams(reader);
-        return reader;
+            using var outType = MediaFactory.MFCreateMediaType();
+            outType.Set(MediaTypeAttributeKeys.MajorType, MediaTypeGuids.Video);
+            if (scaled)
+            {
+                outType.Set(MediaTypeAttributeKeys.Subtype, VideoFormatGuids.Rgb32);
+                outType.Set(MediaTypeAttributeKeys.FrameSize, MediaFactory.PackSize((uint)_width, (uint)_height));
+                outType.Set(MediaTypeAttributeKeys.DefaultStride, (ulong)(_width * 4));
+            }
+            else
+            {
+                outType.Set(MediaTypeAttributeKeys.Subtype, Nv12Subtype);
+                outType.Set(MediaTypeAttributeKeys.FrameSize, MediaFactory.PackSize(srcWidth, srcHeight));
+                outType.Set(MediaTypeAttributeKeys.DefaultStride, srcWidth);
+            }
+            outType.Set(MediaTypeAttributeKeys.FrameRate, MediaFactory.PackRatio(30, 1));
+            reader.SetCurrentMediaType((int)SourceReaderIndex.FirstVideoStream, outType);
+
+            if (!scaled) BuildScaleTables();
+            _nv12 = !scaled;
+            // Don't assume stream 1 is audio — a 4K file can lead with a data or subtitle track and
+            // have no audio at all, and unselecting a non-existent stream fails with
+            // MF_E_INVALIDSTREAMNUMBER. Walk every stream instead and disable anything not video.
+            DisableNonVideoStreams(reader);
+            return reader;
+        }
+        catch (Exception ex)
+        {
+            reader.Dispose();
+            if (scaled)
+            {
+                Error = ex.Message;
+                Log.Warn($"CPU video preview failed for {path}: {ex.Message}");
+            }
+            return null;
+        }
+    }
+
+    /// <summary>Per output column/row, the half-open source range it averages. 1920×1080 → 640×360
+    /// is an exact 3×3 box; other sizes round, which is fine at thumbnail scale.</summary>
+    private void BuildScaleTables()
+    {
+        _cols = BuildRanges(_width, _srcWidth);
+        _rows = BuildRanges(_height, _srcHeight);
+    }
+
+    private static int[] BuildRanges(int output, int source)
+    {
+        // Two ints per pixel: start and end.
+        var ranges = new int[output * 2];
+        for (int i = 0; i < output; i++)
+        {
+            ranges[i * 2] = (int)((long)i * source / output);
+            ranges[i * 2 + 1] = Math.Max(ranges[i * 2] + 1, (int)((long)(i + 1) * source / output));
+        }
+        return ranges;
     }
 
     /// <summary>Walks the stream list and unselects everything that is not video, so files with a
@@ -169,57 +294,187 @@ public sealed class CpuVideoDecoder : IDisposable
         }
     }
 
-    /// <summary>Copies the contiguous RGB32 sample into a Bitmap. RGB32 in memory is B,G,R,X —
-    /// the layout GDI+ calls Format32bppRgb.</summary>
-    private Bitmap? ToBitmap(IMFSample sample)
+    /// <summary>Copies the latest sample into the shared BGRX buffer at the preview size.</summary>
+    private bool CopySample(IMFSample sample)
     {
-        if (_width <= 0 || _height <= 0) return null;
+        if (_width <= 0 || _height <= 0) return false;
 
-        using var buffer = sample.ConvertToContiguousBuffer();
+        using var buffer = sample.GetBufferByIndex(0);
+        if (buffer is null) return false;
+
+        // A decoder's frame is a 2D surface and only Lock2D knows its real row pitch; assuming
+        // tight rows shears the picture, which is exactly what the first version did. The surface
+        // is also padded vertically (a 1080-line frame lives in 1088 rows), so the chroma plane
+        // is not where the frame height says it is — Lock2DSize tells us the true size.
+        IMF2DBuffer2? surface2 = null;
+        try { surface2 = buffer.QueryInterfaceOrNull<IMF2DBuffer2>(); }
+        catch { /* not a 2D buffer: fall through to the contiguous path */ }
+
+        if (surface2 is not null)
+        {
+            try
+            {
+                surface2.Lock2DSize(Buffer2DLockFlags.Read, out IntPtr scan0, out int pitch, out _, out int byteLength);
+                try
+                {
+                    if (pitch <= 0) return false;
+                    int planeHeight = _srcHeight;
+                    if (_nv12 && byteLength > 0)
+                    {
+                        // Y + interleaved UV: total = pitch × height × 1.5.
+                        int derived = (int)((long)byteLength * 2 / (3L * pitch));
+                        if (derived >= _srcHeight) planeHeight = derived;
+                    }
+                    return _nv12 ? CopyNv12(scan0, pitch, planeHeight) : CopyRgb32(scan0, pitch);
+                }
+                finally { surface2.Unlock2D(); }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"CPU video surface could not be locked: {ex.Message}");
+                return false;
+            }
+            finally { surface2.Dispose(); }
+        }
+
+        IMF2DBuffer? surface = null;
+        try { surface = buffer.QueryInterfaceOrNull<IMF2DBuffer>(); }
+        catch { }
+        if (surface is not null)
+        {
+            try
+            {
+                surface.Lock2D(out IntPtr scan0, out int pitch);
+                try
+                {
+                    if (pitch <= 0) return false;
+                    return _nv12 ? CopyNv12(scan0, pitch, _srcHeight) : CopyRgb32(scan0, pitch);
+                }
+                finally { surface.Unlock2D(); }
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"CPU video surface could not be locked: {ex.Message}");
+                return false;
+            }
+            finally { surface.Dispose(); }
+        }
+
         IntPtr data = IntPtr.Zero;
-        int currentLength = 0;
         try
         {
-            buffer.Lock(out data, out _, out currentLength);
+            buffer.Lock(out data, out _, out _);
         }
         catch (Exception ex)
         {
             Log.Warn($"CPU video sample could not be locked: {ex.Message}");
-            return null;
+            return false;
         }
 
-        int width = _width, height = _height;
-        int srcStride = width * 4;
-        if (currentLength < (long)srcStride * height) { buffer.Unlock(); return null; }
-
-        var bitmap = new Bitmap(width, height, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
-        var rect = new Rectangle(0, 0, width, height);
-        var dest = bitmap.LockBits(rect, System.Drawing.Imaging.ImageLockMode.WriteOnly,
-            System.Drawing.Imaging.PixelFormat.Format32bppRgb);
         try
         {
-            unsafe
-            {
-                byte* src = (byte*)data.ToPointer();
-                byte* dst = (byte*)dest.Scan0.ToPointer();
-                for (int y = 0; y < height; y++)
-                    Buffer.MemoryCopy(src + (long)y * srcStride, dst + (long)y * dest.Stride, dest.Stride, srcStride);
-            }
+            return _nv12 ? CopyNv12(data, _srcWidth, _srcHeight) : CopyRgb32(data, _width * 4);
         }
         finally
         {
-            bitmap.UnlockBits(dest);
             buffer.Unlock();
         }
-        return bitmap;
+    }
+
+    /// <summary>RGB32 at the preview size (the video-processor fallback): a straight copy. RGB32 in
+    /// memory is B,G,R,X — the layout GDI+ calls Format32bppRgb.</summary>
+    private bool CopyRgb32(IntPtr data, int stride)
+    {
+        int width = _width, height = _height;
+        int rowBytes = width * 4;
+        if (stride < rowBytes) return false;
+
+        lock (_frameGate)
+        {
+            _pixels ??= new byte[rowBytes * height];
+            unsafe
+            {
+                fixed (byte* dstBase = _pixels)
+                {
+                    byte* src = (byte*)data.ToPointer();
+                    for (int y = 0; y < height; y++)
+                        Buffer.MemoryCopy(src + (long)y * stride, dstBase + (long)y * rowBytes, rowBytes, rowBytes);
+                }
+            }
+        }
+        return true;
+    }
+
+    /// <summary>The normal path: native-size NV12, box-filtered down to the preview size. Reads the
+    /// Y plane for the luma of each block and one chroma pair for the block's centre, which is
+    /// all a thumbnail this small can show.</summary>
+    private unsafe bool CopyNv12(IntPtr data, int stride, int planeHeight)
+    {
+        int sw = _srcWidth, sh = _srcHeight, ow = _width, oh = _height;
+        if (_cols is null || _rows is null) return false;
+        if (stride < sw || planeHeight < sh) return false;
+
+        // NV12: a full-size Y plane, then the interleaved U/V plane at half height. The chroma
+        // plane begins a whole pitch-sized run of rows after the luma plane — of the *surface's*
+        // height, which is padded up (1080 lines live in 1088 rows).
+        byte* src = (byte*)data.ToPointer();
+        byte* uv = src + (long)stride * planeHeight;
+        int[] cols = _cols, rows = _rows;
+
+        lock (_frameGate)
+        {
+            int rowBytes = ow * 4;
+            _pixels ??= new byte[rowBytes * oh];
+            fixed (byte* dstBase = _pixels)
+            {
+                for (int y = 0; y < oh; y++)
+                {
+                    int y0 = rows[y * 2], y1 = rows[y * 2 + 1];
+                    int uy = Math.Min(y0 + ((y1 - y0) >> 1), sh / 2 - 1);
+                    byte* uvRow = uv + (long)uy * stride;
+                    byte* dst = dstBase + (long)y * rowBytes;
+                    for (int x = 0; x < ow; x++)
+                    {
+                        int x0 = cols[x * 2], x1 = cols[x * 2 + 1];
+                        // Mean of the block's luma.
+                        int sum = 0;
+                        for (int sy = y0; sy < y1; sy++)
+                        {
+                            byte* luma = src + (long)sy * stride;
+                            for (int sx = x0; sx < x1; sx++) sum += luma[sx];
+                        }
+                        int yValue = sum / ((x1 - x0) * (y1 - y0));
+
+                        // One byte pair per 2×2 luma block: the pair for column c is at 2c.
+                        int ux = Math.Min(x0 + ((x1 - x0) >> 1), sw / 2 - 1) * 2;
+                        int u = uvRow[ux] - 128;
+                        int v = uvRow[ux + 1] - 128;
+
+                        // BT.709 studio-swing YUV → RGB. The reader hands out NV12 for HD content,
+                        // and HD is BT.709; decoding it as BT.601 (the SD matrix) pulls skin tones
+                        // green.
+                        int c = yValue - 16;
+                        if (c < 0) c = 0;
+                        int r = (298 * c + 459 * v + 128) >> 8;
+                        int g = (298 * c - 55 * u - 136 * v + 128) >> 8;
+                        int b = (298 * c + 541 * u + 128) >> 8;
+                        dst[0] = (byte)(b < 0 ? 0 : b > 255 ? 255 : b);
+                        dst[1] = (byte)(g < 0 ? 0 : g > 255 ? 255 : g);
+                        dst[2] = (byte)(r < 0 ? 0 : r > 255 ? 255 : r);
+                        dst[3] = 255;
+                        dst += 4;
+                    }
+                }
+            }
+        }
+        return true;
     }
 
     public void Dispose()
     {
         _stop.Cancel();
         try { _thread.Join(1500); } catch { /* best effort */ }
-        var leftover = Interlocked.Exchange(ref _frame, null);
-        leftover?.Dispose();
+        lock (_frameGate) _pixels = null;
         _stop.Dispose();
     }
 }

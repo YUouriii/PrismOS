@@ -772,16 +772,24 @@ public sealed class Engine : IDisposable
                 return;
             }
             Log.Info("Opening settings panel");
-            using var form = new Tray.SettingsForm(this);
-            _settingsForm = form;
-            try
+            using (var form = new Tray.SettingsForm(this))
             {
-                form.ShowDialog();
+                _settingsForm = form;
+                try
+                {
+                    form.ShowDialog();
+                }
+                finally
+                {
+                    _settingsForm = null;
+                }
             }
-            finally
-            {
-                _settingsForm = null;
-            }
+            // The panel owns GDI+ bitmaps, and a visit to the Wallpaper page owns a Media
+            // Foundation reader. Both free their native memory only on finalization, so without
+            // this the process keeps the panel's peak working set after it is closed.
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
         }
         catch (Exception ex)
         {

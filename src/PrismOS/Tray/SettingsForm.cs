@@ -228,6 +228,11 @@ public sealed class SettingsForm : Form
             _pages[i].Page.Visible = active;
             _pages[i].Tab.Selected = active;
         }
+        // WinForms does not tell a page's children that their page was hidden, so the live
+        // wallpaper preview is switched explicitly: it must not keep a decoder alive while
+        // another page is on screen. Its own Visible is the effective visibility, which already
+        // accounts for the page it sits in.
+        if (_wallpaperPreview is not null) _wallpaperPreview.SetActive(_wallpaperPreview.Visible);
         ResizeToActivePage();
     }
 
@@ -334,8 +339,10 @@ public sealed class SettingsForm : Form
         return card;
     }
 
-    /// <summary>The wallpaper's own frame behind the tiles when there is one. Copied out of the
-    /// file so the engine can keep rewriting it while the window is open.</summary>
+    /// <summary>The wallpaper's own frame behind the tiles when there is one, already scaled to the
+    /// miniature the tiles draw. Copied out of the file so the engine can keep rewriting it while
+    /// the window is open, and scaled here once: the tiles used to each draw the full monitor image
+    /// down to 640×360, whose GDI+ scratch was the 250 MB spike when the Style page opened.</summary>
     private Image? LoadBackdrop()
     {
         try
@@ -343,7 +350,18 @@ public sealed class SettingsForm : Form
             if (_engine.PreviewBackdropPath() is not { } path) return null;
             using var stream = File.OpenRead(path);
             using var image = Image.FromStream(stream);
-            return new Bitmap(image);
+            var canvas = ThemePreview.CanvasSize;
+            var scaled = new Bitmap(canvas.Width, canvas.Height,
+                System.Drawing.Imaging.PixelFormat.Format32bppPArgb);
+            using (var g = Graphics.FromImage(scaled))
+            {
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                float cover = Math.Max((float)canvas.Width / image.Width, (float)canvas.Height / image.Height);
+                float w = image.Width * cover, h = image.Height * cover;
+                g.DrawImage(image, (canvas.Width - w) / 2f, (canvas.Height - h) / 2f, w, h);
+            }
+            return scaled;
         }
         catch (Exception ex)
         {

@@ -20,6 +20,8 @@ public sealed class WallpaperPreview : Control
         new(StringComparer.OrdinalIgnoreCase) { ".mp4", ".m4v", ".mov", ".avi", ".wmv", ".mkv", ".webm" };
 
     private Bitmap? _bitmap;
+    private Bitmap? _frameBitmap;
+    private int _framePending;
     private CpuVideoDecoder? _decoder;
     private string? _path;
     private string _placeholder = "No wallpaper set";
@@ -74,6 +76,8 @@ public sealed class WallpaperPreview : Control
         StopDecoder();
         _bitmap?.Dispose();
         _bitmap = null;
+        _frameBitmap?.Dispose();
+        _frameBitmap = null;
 
         if (path is null)
         {
@@ -89,9 +93,10 @@ public sealed class WallpaperPreview : Control
         }
         if (IsVideoPath(path))
         {
-            _decoder = new CpuVideoDecoder(path);
-            _decoder.FrameReady += OnFrameReady;
-            if (Visible) _decoder.Start();
+            // Start only when this control is really on screen. A control that has not been
+            // parented yet reports Visible == true, so starting here used to spin up a 4K
+            // Media Foundation decode for a page the user had not opened.
+            if (IsHandleCreated && Visible) StartDecoder(path);
             _placeholder = "Loading preview…";
         }
         else
@@ -99,6 +104,13 @@ public sealed class WallpaperPreview : Control
             LoadImage(path);
         }
         Invalidate();
+    }
+
+    private void StartDecoder(string path)
+    {
+        _decoder = new CpuVideoDecoder(path);
+        _decoder.FrameReady += OnFrameReady;
+        _decoder.Start();
     }
 
     private void StopDecoder()
@@ -112,12 +124,26 @@ public sealed class WallpaperPreview : Control
     private void OnFrameReady()
     {
         if (IsDisposed) return;
+        // A frame every 16 ms must not queue a message each time: one pending invalidate is
+        // enough, and WinForms will paint once.
+        if (Interlocked.Exchange(ref _framePending, 1) != 0) return;
         try
         {
-            if (!IsHandleCreated) return;
-            BeginInvoke((MethodInvoker)(() => Invalidate()));
+            if (!IsHandleCreated)
+            {
+                Volatile.Write(ref _framePending, 0);
+                return;
+            }
+            BeginInvoke((MethodInvoker)(() =>
+            {
+                Volatile.Write(ref _framePending, 0);
+                Invalidate();
+            }));
         }
-        catch { /* the panel went away mid-notification */ }
+        catch
+        {
+            Volatile.Write(ref _framePending, 0); // the panel went away mid-notification
+        }
     }
 
     private void LoadImage(string path)
@@ -178,11 +204,40 @@ public sealed class WallpaperPreview : Control
         g.Restore(state);
     }
 
+    /// <summary>Starts or stops the live decode. The Wallpaper page calls this when it is shown or
+    /// left: a paused Media Foundation reader still owns its decode pipeline and a pool of
+    /// full-size surfaces, so the pipeline is torn down entirely off the page and rebuilt on
+    /// return.</summary>
+    public void SetActive(bool active)
+    {
+        if (!active)
+        {
+            bool hadDecoder = _decoder is not null;
+            StopDecoder();
+            // Media Foundation frees the reader's buffers through finalization; collect off the
+            // UI thread so leaving the page stays snappy but the peak does not linger.
+            if (hadDecoder)
+                ThreadPool.QueueUserWorkItem(_ =>
+                {
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                    GC.Collect();
+                });
+            Invalidate();
+            return;
+        }
+
+        if (_decoder is null && _path is not null && IsVideoPath(_path) && File.Exists(_path) && IsHandleCreated)
+            StartDecoder(_path);
+        _decoder?.Resume();
+        Invalidate();
+    }
+
     protected override void OnVisibleChanged(EventArgs e)
     {
         base.OnVisibleChanged(e);
-        if (_decoder is null) return;
-        if (Visible) { _decoder.Start(); _decoder.Resume(); } else _decoder.Pause();
+        if (_path is null) return;
+        SetActive(Visible);
     }
 
     protected override void OnResize(EventArgs e)
@@ -196,33 +251,43 @@ public sealed class WallpaperPreview : Control
         var g = e.Graphics;
         g.Clear(BackColor);
 
+        // The page becoming visible does not guarantee this control has a handle yet, so the
+        // decoder is started here: OnPaint only runs when the page really is on screen.
+        if (_decoder is null && _path is not null && IsVideoPath(_path) && Visible)
+            StartDecoder(_path);
+
         int captionHeight = _caption.Length > 0 ? CaptionHeight : 0;
         var imageArea = new Rectangle(0, 0, Width, Height - captionHeight);
 
-        var frame = _decoder?.GetFrame();
+        // The decoder owns one pixel buffer; the panel owns one bitmap. Nothing is allocated per
+        // frame, so a looping video preview is flat in memory.
+        Bitmap? frame = null;
+        if (_decoder is not null && _decoder.Width > 0 && _decoder.Height > 0)
+        {
+            if (_frameBitmap is null || _frameBitmap.Width != _decoder.Width || _frameBitmap.Height != _decoder.Height)
+            {
+                _frameBitmap?.Dispose();
+                _frameBitmap = new Bitmap(_decoder.Width, _decoder.Height,
+                    System.Drawing.Imaging.PixelFormat.Format32bppRgb);
+            }
+            if (_decoder.TryCopyFrame(_frameBitmap)) frame = _frameBitmap;
+        }
         var image = (Image?)frame ?? _bitmap;
         string? error = _decoder?.Error;
 
-        try
+        if (image is not null)
         {
-            if (image is not null)
-            {
-                DrawImage(g, image, imageArea);
-            }
-            else
-            {
-                using var text = new SolidBrush(Theme.Colors.Subtle);
-                using var format = new StringFormat
-                {
-                    Alignment = StringAlignment.Center,
-                    LineAlignment = StringAlignment.Center,
-                };
-                g.DrawString(error is not null ? $"Could not play: {error}" : _placeholder, Font, text, imageArea, format);
-            }
+            DrawImage(g, image, imageArea);
         }
-        finally
+        else
         {
-            frame?.Dispose(); // the decoder hands out clones; the still bitmap belongs to us
+            using var text = new SolidBrush(Theme.Colors.Subtle);
+            using var format = new StringFormat
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center,
+            };
+            g.DrawString(error is not null ? $"Could not play: {error}" : _placeholder, Font, text, imageArea, format);
         }
 
         if (captionHeight > 0)
@@ -246,6 +311,8 @@ public sealed class WallpaperPreview : Control
             StopDecoder();
             _bitmap?.Dispose();
             _bitmap = null;
+            _frameBitmap?.Dispose();
+            _frameBitmap = null;
         }
         base.Dispose(disposing);
     }

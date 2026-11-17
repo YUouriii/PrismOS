@@ -31,6 +31,7 @@ public sealed class NowPlayingOverlay : IDisposable
     private readonly Lock _sync = new();
 
     private SIZE _size;
+    private Bitmap? _surface;
     private readonly Func<MonitorInfo, string?>? _backdrop;
     private readonly Func<float[]?>? _readBands;
     private readonly bool _blur;
@@ -190,13 +191,20 @@ public sealed class NowPlayingOverlay : IDisposable
                 overlay.SetOffset(offsetX, offsetY);
             }
 
-            using var bmp = new Bitmap(size.Cx, size.Cy, PixelFormat.Format32bppPArgb);
+            var bmp = _surface;
+            if (bmp is null || bmp.Width != size.Cx || bmp.Height != size.Cy)
+            {
+                bmp?.Dispose();
+                bmp = _surface = new Bitmap(size.Cx, size.Cy, PixelFormat.Format32bppPArgb);
+            }
             using (var g = Graphics.FromImage(bmp))
             {
                 if (_blur && _backdrop?.Invoke(_monitor) is { } still && File.Exists(still))
                     PanelBlur.ApplyUnderPanel(g, _monitor, still,
                         new Rectangle(screenPos.X - _monitor.Bounds.Left, screenPos.Y - _monitor.Bounds.Top, size.Cx, size.Cy),
                         [new PanelBlur.Region(new RectangleF(pad, pad, metrics.Size.Width, metrics.Size.Height), metrics.Size.Height * 0.32f)]);
+                else
+                    g.Clear(Color.Transparent);
                 g.TranslateTransform(pad, pad);
                 MusicStrip.Paint(g, metrics, reading, _source.Art, scale, MusicStrip.BarPhase(), _blur ? 136 : 216,
                                  _readBands?.Invoke(), _style.Accent, _config.Disc.ShowProgress);
@@ -218,6 +226,8 @@ public sealed class NowPlayingOverlay : IDisposable
             _ticking = false;
             _source.Changed -= OnSourceChanged;
             _timer.Dispose();
+            _surface?.Dispose();
+            _surface = null;
             try { _host.RemoveOverlay(OverlayKey); } catch { /* host may already be gone */ }
         }
     }

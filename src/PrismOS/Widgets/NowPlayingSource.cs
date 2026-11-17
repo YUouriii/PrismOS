@@ -85,6 +85,9 @@ public sealed partial class NowPlayingSource : IWidgetSource
     private string _artKey = "";
     private string _iconKey = "";
     private string _onlineKey = "";
+    /// <summary>The track whose source-app icon is already on screen. Without it every 1.5 s poll
+    /// re-extracted and re-compared the same icon for a track that publishes no cover.</summary>
+    private volatile string _fallbackKey = "";
     private volatile string _wantedArtKey = "";
     private int _refreshBusy;
     private string? _sourceApp;
@@ -344,13 +347,11 @@ public sealed partial class NowPlayingSource : IWidgetSource
                         fetchedArt = await OnlineArt.Find(props?.Title, props?.Artist);
                         if (fetchedArt is not null) artSource = "online search";
                     }
-                    if (fetchedArt is null)
+                    if (fetchedArt is null && artKey != _fallbackKey)
                     {
                         fetchedArt = MusicArt.ForSource(aumid, FriendlySourceName(aumid));
                         artSource = "source app";
                     }
-                    if (fetchedArt is not null)
-                        Log.Info($"Now playing: art from the {artSource}");
                 }
             }
         }
@@ -379,8 +380,17 @@ public sealed partial class NowPlayingSource : IWidgetSource
             {
                 _art?.Dispose();
                 _art = fetchedArt;
-                if (artSource == "source app") _iconKey = artKey;
-                else { _artKey = artKey; _iconKey = artKey; }
+                if (artSource == "source app")
+                {
+                    _iconKey = artKey;
+                    _fallbackKey = artKey;
+                }
+                else
+                {
+                    _artKey = artKey;
+                    _iconKey = artKey;
+                }
+                Log.Info($"Now playing: art from the {artSource}");
             }
             else if (!current || !artForWanted)
             {
