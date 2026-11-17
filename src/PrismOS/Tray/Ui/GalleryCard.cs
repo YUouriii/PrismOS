@@ -341,6 +341,8 @@ internal sealed class SearchField : Panel
         base.OnLayout(e);
         // Layout fires on every size change, including the one the constructor triggers before
         // the field exists.
-        _box?.SetBounds(10, 1, Math.Max(1, Width - 16), Height - 2);
+        if (_box is null) return;
+        int height = _box.PreferredHeight;
+        _box.SetBounds(9, (Height - height) / 2, Math.Max(1, Width - 16), height);
     }
 }

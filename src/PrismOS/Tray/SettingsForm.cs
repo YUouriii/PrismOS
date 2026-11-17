@@ -918,6 +918,8 @@ public sealed class SettingsForm : Form
             Text = "Gallery…",
             Width = 96,
             Height = 28,
+            // No margin: the default 3px margin drops this button below Browse… on the row.
+            Margin = new Padding(0),
         };
         gallery.Click += (_, _) => OpenGallery();
 

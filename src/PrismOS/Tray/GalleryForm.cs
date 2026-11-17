@@ -166,7 +166,7 @@ public sealed class GalleryForm : Form
             var card = new GalleryCard(entry);
             card.Downloaded = engine.IsGalleryDownloaded(entry);
             card.Picked += (_, _) => Select(card.Entry);
-            card.DoubleClick += (_, _) => Select(card.Entry);
+            card.DoubleClick += (_, _) => { Select(card.Entry); Apply(card.Entry); };
             _cards.Add(card);
             _list.Controls.Add(card);
         }
@@ -221,7 +221,7 @@ public sealed class GalleryForm : Form
             Margin = new Padding(0),
         };
         _actions = actions;
-        _apply = new TrayButton { Text = "Download & apply", Width = 150, Height = 34, Variant = TrayButton.Weight.Primary };
+        _apply = new TrayButton { Text = "Set wallpaper", Width = 130, Height = 34, Variant = TrayButton.Weight.Primary };
         _apply.Click += (_, _) => { if (_selected is not null) Apply(_selected); };
         _remove = new TrayButton { Text = "Remove", Width = 96, Height = 34, Margin = new Padding(8, 0, 0, 0) };
         _remove.Click += (_, _) => { if (_selected is not null) Remove(_selected); };
@@ -436,12 +436,14 @@ public sealed class GalleryForm : Form
         _credit.Text = entry.CreditLine.Length > 0 ? $"Credit: {entry.CreditLine}" : "";
         _source.Visible = entry.SourcePage.Length > 0;
 
-        _apply.Text = downloaded ? "Apply" : "Download & apply";
+        _apply.Text = "Set wallpaper";
         _apply.Visible = true;
         _remove.Visible = downloaded;
         _remove.Enabled = downloaded && !_engine.IsGalleryEntryInUse(entry);
         _open.Visible = downloaded;
-        _status.Text = downloaded ? "" : "Not downloaded yet — press the button to fetch it.";
+        _status.Text = downloaded
+            ? "Ready — press Set wallpaper to put it on the desktop."
+            : $"Not on this PC yet — Set wallpaper downloads the {entry.SizeLabel} first.";
         _status.ForeColor = Theme.Colors.Subtle;
 
         if (local is not null)
@@ -496,30 +498,40 @@ public sealed class GalleryForm : Form
     }
 
     /// <summary>Positions the preview, then the text under it, then the actions. The preview is
-    /// always 16:9 and capped, so the pane does not grow a metre of video at a large window.</summary>
+    /// always 16:9 and deliberately capped: at 340 px it pushed the action row past the bottom of
+    /// the pane, where the footer clipped it. The pane is only ~550 px tall, so the preview takes
+    /// what is left after the text, and never more than a third of the height.</summary>
     private void LayoutDetail()
     {
         if (_detail.ClientSize.Width <= 10) return;
         int width = _detail.ClientSize.Width - DetailPadding * 2;
-        int previewHeight = Math.Min(340, Math.Max(160, (int)(width * 9.0 / 16.0)));
+        int available = Math.Max(150, _detail.ClientSize.Height - DetailPadding * 2
+            - 30                     // title + gap
+            - 26                     // meta + gap
+            - Math.Max(0, _description.PreferredSize.Height) - 10
+            - Math.Max(0, _credit.PreferredSize.Height) - 8
+            - 22                     // source + gap
+            - 40                     // actions
+            - 20                     // status + gap
+        );
+        int previewHeight = Math.Min(280, available);
         _preview.SetBounds(DetailPadding, DetailPadding, width, previewHeight);
 
-        int y = DetailPadding + previewHeight + 18;
+        int y = DetailPadding + previewHeight + 12;
         _title.SetBounds(DetailPadding, y, width, 22);
-        y += 28;
+        y += 26;
         _meta.SetBounds(DetailPadding, y, width, 16);
-        y += 24;
+        y += 22;
 
         Place(_description, y, width);
-        y = _description.Bottom + 8;
+        y = _description.Bottom + 6;
         Place(_credit, y, width);
-        y = _credit.Bottom + 8;
+        y = _credit.Bottom + 4;
         Place(_source, y, width);
-        y = _source.Bottom + 14;
+        y = _source.Bottom + 12;
 
-        foreach (Control control in _detail.Controls)
-            if (control == _actions) _actions.Location = new Point(DetailPadding, y);
-        y += 40;
+        _actions.Location = new Point(DetailPadding, y);
+        y += 38;
         _status.SetBounds(DetailPadding, y, width, 16);
     }
 
