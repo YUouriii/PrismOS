@@ -47,14 +47,14 @@ unsigned, so SmartScreen will warn: choose More info, then Run anyway.
 <details>
 <summary><b>Or take the ZIP, or build it yourself</b></summary>
 
-**ZIP.** Download `prismos-v0.40.0-win-x64.zip` from the
+**ZIP.** Download `prismos-v0.41.0-win-x64.zip` from the
 [latest release](https://github.com/YUouriii/PrismOS/releases/latest). It unzips to a single
 `prismos.exe`, so there is no installer. The first run adds PrismOS to your Start menu;
 delete that entry and it stays deleted. To uninstall, turn off "Start with Windows", quit the
 app, then delete the folder and the Start menu entry. Check the download if you like:
 
 ```powershell
-Get-FileHash .\prismos-v0.40.0-win-x64.zip -Algorithm SHA256
+Get-FileHash .\prismos-v0.41.0-win-x64.zip -Algorithm SHA256
 # Compare with the .sha256 file next to the download in the release assets.
 ```
 

@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
 PackageIdentifier: YUouriii.PrismOS
-PackageVersion: 0.40.0
+PackageVersion: 0.41.0
 MinimumOSVersion: 10.0.17763.0
 InstallerType: zip
 NestedInstallerType: portable
@@ -8,18 +8,18 @@ NestedInstallerFiles:
   - RelativeFilePath: prismos.exe
     PortableCommandAlias: prismos
 UpgradeBehavior: install
-ReleaseDate: 2026-11-16
+ReleaseDate: 2026-11-17
 Dependencies:
   PackageDependencies:
     - PackageIdentifier: Microsoft.DotNet.DesktopRuntime.10
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/YUouriii/PrismOS/releases/download/v0.40.0/prismos-v0.40.0-win-x64.zip
+    InstallerUrl: https://github.com/YUouriii/PrismOS/releases/download/v0.41.0/prismos-v0.41.0-win-x64.zip
     # TODO(release): replace with the SHA-256 from this fork's own
     # prismos-<tag>-win-x64.zip.sha256 asset. The upstream FeatherWall value is not valid here,
     # and winget validation downloads the asset to check it.
-    # v0.40.0 is a new tag for this fork; the inherited v0.1..v0.3 tags have no assets.
-    # The hash comes from the release's prismos-v0.40.0-win-x64.zip.sha256 once the assets exist.
+    # v0.41.0 is a new tag for this fork; the inherited v0.1..v0.3 tags have no assets.
+    # The hash comes from the release's prismos-v0.41.0-win-x64.zip.sha256 once the assets exist.
     InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
 ManifestType: installer
 ManifestVersion: 1.6.0
