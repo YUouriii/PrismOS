@@ -582,8 +582,22 @@ public sealed class Engine : IDisposable
     /// <summary>The gallery entries, for the settings panel's gallery picker.</summary>
     public IReadOnlyList<GalleryEntry> GalleryEntries => _gallery.Manifest.Entries;
 
+    /// <summary>The gallery service itself, for the gallery window: it previews stills and manages
+    /// the cached downloads, which the pass-throughs below do not cover.</summary>
+    public GalleryService Gallery => _gallery;
+
     /// <summary>Whether a gallery entry is already on disk, so applying it costs no download.</summary>
     public bool IsGalleryDownloaded(GalleryEntry entry) => _gallery.LocalPathIfDownloaded(entry) is not null;
+
+    /// <summary>True when this gallery file is one of the wallpapers currently in use. A download
+    /// that is on the desktop cannot be removed — deleting it would leave a wallpaper pointing at
+    /// a file that is no longer there.</summary>
+    public bool IsGalleryEntryInUse(GalleryEntry entry)
+    {
+        var path = _gallery.LocalPathIfDownloaded(entry);
+        return path is not null
+            && _config.Wallpapers.Any(w => string.Equals(w.Path, path, StringComparison.OrdinalIgnoreCase));
+    }
 
     /// <summary>Downloads a gallery entry if it is not cached, and returns the local file.</summary>
     public Task<string> DownloadGalleryEntryAsync(GalleryEntry entry, IProgress<double>? progress = null) =>

@@ -6,6 +6,13 @@ using PrismOS.Common;
 
 namespace PrismOS.Gallery;
 
+public enum GalleryKind
+{
+    All,
+    Photos,
+    Videos,
+}
+
 public sealed class GalleryEntry
 {
     public string Id { get; set; } = "";
@@ -22,6 +29,31 @@ public sealed class GalleryEntry
     public string? Sha1 { get; set; }
     public bool MfNative { get; set; } = true;
     public string Description { get; set; } = "";
+
+    /// <summary>A small still for the gallery's list and preview, so browsing costs a few dozen
+    /// kilobytes rather than the wallpaper itself. Empty means the file has no still.</summary>
+    public string Thumbnail { get; set; } = "";
+
+    /// <summary>"photo" rather than "image": the gallery is showing pictures to people, not media
+    /// types to a pipeline.</summary>
+    public string KindLabel => Type == "video" ? "video" : "photo";
+
+    /// <summary>Resolution, or "unknown size" for a manifest entry that did not record one.</summary>
+    public string ResolutionLabel => Width > 0 && Height > 0 ? $"{Width}×{Height}" : "unknown size";
+
+    /// <summary>Whether the entry survives the gallery's search box and kind filter.</summary>
+    public bool Matches(string? query, GalleryKind kind)
+    {
+        if (kind == GalleryKind.Videos && Type != "video") return false;
+        if (kind == GalleryKind.Photos && Type != "image") return false;
+
+        var text = query?.Trim();
+        if (string.IsNullOrEmpty(text)) return true;
+        return Title.Contains(text, StringComparison.OrdinalIgnoreCase)
+            || Description.Contains(text, StringComparison.OrdinalIgnoreCase)
+            || Author.Contains(text, StringComparison.OrdinalIgnoreCase)
+            || License.Contains(text, StringComparison.OrdinalIgnoreCase);
+    }
 
     public string SizeLabel => Bytes switch
     {
@@ -74,6 +106,10 @@ public sealed class GalleryService
 
     public string GalleryDirectory { get; } = Path.Combine(Log.Directory, "gallery");
 
+    /// <summary>Stills kept beside the downloads. A thumbnail is a browsing cost, so it lives
+    /// with the cache rather than next to the user's own files.</summary>
+    public string ThumbnailDirectory { get; } = Path.Combine(Log.Directory, "gallery", "thumbnails");
+
     public GalleryManifest Manifest { get; }
 
     public GalleryService()
@@ -91,6 +127,99 @@ public sealed class GalleryService
 
     private string LocalPath(GalleryEntry entry) =>
         Path.Combine(GalleryDirectory, entry.Id + Path.GetExtension(new Uri(entry.Url).AbsolutePath));
+
+    /// <summary>Where this entry's still is (or will be) cached. The extension follows the
+    /// thumbnail URL so the file decodes the same way it was served.</summary>
+    public string ThumbnailPath(GalleryEntry entry)
+    {
+        var extension = ".jpg";
+        try
+        {
+            var fromUrl = Path.GetExtension(new Uri(entry.Thumbnail).AbsolutePath).ToLowerInvariant();
+            if (ImageExtensions.Contains(fromUrl)) extension = fromUrl;
+        }
+        catch
+        {
+            // A missing or malformed thumbnail URL simply falls back to .jpg.
+        }
+        return Path.Combine(ThumbnailDirectory, entry.Id + extension);
+    }
+
+    private static readonly HashSet<string> ImageExtensions = [".jpg", ".jpeg", ".png", ".webp"];
+
+    public string? LocalThumbnailIfCached(GalleryEntry entry)
+    {
+        if (string.IsNullOrWhiteSpace(entry.Thumbnail)) return null;
+        var path = ThumbnailPath(entry);
+        return File.Exists(path) ? path : null;
+    }
+
+    /// <summary>One still, fetched once and then read from disk. Best effort by design: a gallery
+    /// with no still is a plain card, not an error the user has to read.</summary>
+    public Task<string?> EnsureThumbnailAsync(GalleryEntry entry)
+    {
+        if (string.IsNullOrWhiteSpace(entry.Thumbnail)) return Task.FromResult<string?>(null);
+        if (LocalThumbnailIfCached(entry) is { } cached) return Task.FromResult<string?>(cached);
+
+        // Reuse the in-flight request: a card and the preview ask for the same still at once.
+        lock (ThumbnailTasks)
+        {
+            if (ThumbnailTasks.TryGetValue(entry.Id, out var running)) return running;
+            var task = FetchThumbnailAsync(entry);
+            ThumbnailTasks[entry.Id] = task;
+            return task;
+        }
+    }
+
+    private readonly Dictionary<string, Task<string?>> ThumbnailTasks = [];
+
+    private async Task<string?> FetchThumbnailAsync(GalleryEntry entry)
+    {
+        var path = ThumbnailPath(entry);
+        var temp = path + ".partial";
+        try
+        {
+            Directory.CreateDirectory(ThumbnailDirectory);
+            using (var response = await Http.GetAsync(entry.Thumbnail, HttpCompletionOption.ResponseHeadersRead))
+            {
+                response.EnsureSuccessStatusCode();
+                await using var source = await response.Content.ReadAsStreamAsync();
+                await using var target = File.Create(temp);
+                await source.CopyToAsync(target);
+            }
+            File.Move(temp, path, overwrite: true);
+            return path;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Gallery thumbnail failed for {entry.Id}: {ex.Message}");
+            try { if (File.Exists(temp)) File.Delete(temp); } catch { /* best effort */ }
+            return null;
+        }
+        finally
+        {
+            lock (ThumbnailTasks) ThumbnailTasks.Remove(entry.Id);
+        }
+    }
+
+    /// <summary>Deletes the downloaded copy, so a gallery of 4K videos does not quietly fill the
+    /// disk. Returns false when it was not there to begin with.</summary>
+    public bool DeleteDownload(GalleryEntry entry)
+    {
+        var path = LocalPath(entry);
+        if (!File.Exists(path)) return false;
+        try
+        {
+            File.Delete(path);
+            Log.Info($"Gallery download removed: {path}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Log.Warn($"Could not remove gallery download {path}: {ex.Message}");
+            return false;
+        }
+    }
 
     /// <summary>The gallery entry a wallpaper path came from, or null for the user's own files.
     /// Downloads land at a deterministic path (gallery directory, entry id, source extension), so
