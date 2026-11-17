@@ -405,9 +405,9 @@ public sealed class CpuVideoDecoder : IDisposable
         return true;
     }
 
-    /// <summary>The normal path: native-size NV12, box-filtered down to the preview size. Reads the
-    /// Y plane for the luma of each block and one chroma pair for the block's centre, which is
-    /// all a thumbnail this small can show.</summary>
+    /// <summary>The normal path: native-size NV12, box-filtered down to the preview size. Luma and
+    /// chroma are each averaged over the block they cover, so the shrink neither aliases nor
+    /// shears the colour plane.</summary>
     private unsafe bool CopyNv12(IntPtr data, int stride, int planeHeight)
     {
         int sw = _srcWidth, sh = _srcHeight, ow = _width, oh = _height;
@@ -419,6 +419,7 @@ public sealed class CpuVideoDecoder : IDisposable
         // height, which is padded up (1080 lines live in 1088 rows).
         byte* src = (byte*)data.ToPointer();
         byte* uv = src + (long)stride * planeHeight;
+        int cw = sw >> 1, ch = sh >> 1;
         int[] cols = _cols, rows = _rows;
 
         lock (_frameGate)
@@ -430,8 +431,9 @@ public sealed class CpuVideoDecoder : IDisposable
                 for (int y = 0; y < oh; y++)
                 {
                     int y0 = rows[y * 2], y1 = rows[y * 2 + 1];
-                    int uy = Math.Min(y0 + ((y1 - y0) >> 1), sh / 2 - 1);
-                    byte* uvRow = uv + (long)uy * stride;
+                    // The chroma rows covered by this block: one byte pair per 2×2 luma block.
+                    int cy0 = y0 >> 1;
+                    int cy1 = Math.Min(ch, Math.Max(cy0 + 1, (y1 + 1) >> 1));
                     byte* dst = dstBase + (long)y * rowBytes;
                     for (int x = 0; x < ow; x++)
                     {
@@ -445,14 +447,28 @@ public sealed class CpuVideoDecoder : IDisposable
                         }
                         int yValue = sum / ((x1 - x0) * (y1 - y0));
 
-                        // One byte pair per 2×2 luma block: the pair for column c is at 2c.
-                        int ux = Math.Min(x0 + ((x1 - x0) >> 1), sw / 2 - 1) * 2;
-                        int u = uvRow[ux] - 128;
-                        int v = uvRow[ux + 1] - 128;
+                        // Mean of the block's chroma. A pixel column c lives in chroma column
+                        // c / 2, and the byte pair for that column starts at 2 × the column —
+                        // using the pixel column here stretched the colour plane and clamped it
+                        // at the middle of the frame, which read as slightly wrong hues.
+                        int cx0 = x0 >> 1;
+                        int cx1 = Math.Min(cw, Math.Max(cx0 + 1, (x1 + 1) >> 1));
+                        int uSum = 0, vSum = 0;
+                        for (int cy = cy0; cy < cy1; cy++)
+                        {
+                            byte* chroma = uv + (long)cy * stride;
+                            for (int cx = cx0; cx < cx1; cx++)
+                            {
+                                uSum += chroma[cx * 2];
+                                vSum += chroma[cx * 2 + 1];
+                            }
+                        }
+                        int samples = (cx1 - cx0) * (cy1 - cy0);
+                        int u = uSum / samples - 128;
+                        int v = vSum / samples - 128;
 
-                        // BT.709 studio-swing YUV → RGB. The reader hands out NV12 for HD content,
-                        // and HD is BT.709; decoding it as BT.601 (the SD matrix) pulls skin tones
-                        // green.
+                        // BT.709 studio-swing YUV → RGB: the file is tagged BT.709 primaries and
+                        // matrix with 16–235 levels, and HD content is 709 in practice anyway.
                         int c = yValue - 16;
                         if (c < 0) c = 0;
                         int r = (298 * c + 459 * v + 128) >> 8;
