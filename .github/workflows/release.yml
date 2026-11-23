@@ -64,18 +64,33 @@ jobs:
             ForEach-Object { "$($_.Hash.ToLower())  PrismOS-Setup.exe" } |
             Out-File PrismOS-Setup.exe.sha256 -Encoding ascii
 
-      - name: Draft release
-        uses: softprops/action-gh-release@v3
-        with:
-          draft: true
-          generate_release_notes: true
-          files: |
-            prismos-*-win-x64.zip
-            prismos-*-win-x64.zip.sha256
-            PrismOS-Setup.exe
-            PrismOS-Setup.exe.sha256
-          body: |
-            `PrismOS-Setup.exe` installs PrismOS for your user, and the .NET 10 desktop runtime too if it is missing. The zip needs the [.NET 10 desktop runtime](https://dotnet.microsoft.com/download/dotnet/10.0) installed already.
+      # The softprops draft step used to die with "Too many retries" and leave the assets
+      # nowhere, so every release was packaged and uploaded by hand. gh is preinstalled on the
+      # runner and publishes straight from the built files; the Velopack feed goes up too so a
+      # future in-app update check has something to read.
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.event.inputs.tag }}"
+          if (-not $tag) { $tag = "${{ github.ref_name }}" }
+          $files = @(
+            "prismos-$tag-win-x64.zip", "prismos-$tag-win-x64.zip.sha256",
+            "PrismOS-Setup.exe", "PrismOS-Setup.exe.sha256",
+            "velopack/RELEASES", "velopack/releases.win.json", "velopack/assets.win.json"
+          )
+          $files += (Get-ChildItem velopack/*-full.nupkg | Select-Object -First 1).FullName
+          $notes = @'
+          `PrismOS-Setup.exe` installs PrismOS for your user, and the .NET 10 desktop runtime too if it is missing. The zip needs the [.NET 10 desktop runtime](https://dotnet.microsoft.com/download/dotnet/10.0) installed already.
 
-            Releases are **unsigned**, so SmartScreen will warn. Verify the SHA-256 against the
-            `.sha256` file, or build from source.
+          Releases are **unsigned**, so SmartScreen will warn. Verify the SHA-256 against the
+          `.sha256` file, or build from source.
+          '@
+          Set-Content -Path notes.md -Value $notes -Encoding utf8
+          if (gh release view $tag 2>$null) {
+            gh release upload $tag @files --clobber
+          } else {
+            gh release create $tag @files --title "PrismOS $($tag.TrimStart('v'))" --notes-file notes.md --latest
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

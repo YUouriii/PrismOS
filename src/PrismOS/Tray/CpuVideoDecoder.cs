@@ -90,6 +90,12 @@ public sealed class CpuVideoDecoder : IDisposable
         get { lock (_frameGate) return _pixels is null ? 0 : _height; }
     }
 
+    /// <summary>The file's own resolution, known as soon as the reader is open — the gallery
+    /// library shows it before any frame has been decoded.</summary>
+    public int SourceWidth => _srcWidth;
+
+    public int SourceHeight => _srcHeight;
+
     /// <summary>Copies the latest frame into <paramref name="destination"/>, which must be the
     /// decoder's size and <c>Format32bppRgb</c>. False before the first frame (or after an error),
     /// in which case the caller draws its placeholder.</summary>

@@ -47,10 +47,20 @@ public sealed class GalleryForm : Form
     private readonly FlowLayoutPanel _chipRow = null!;
     private readonly Panel _toolbar = null!;
     private readonly FlowLayoutPanel _actions = null!;
+    private readonly ComboBox _sourceChoice = null!;
+    private readonly Label _empty = null!;
+    private readonly TrayButton _chooseFolder = null!;
+    private readonly Label _subtitle = null!;
+
+    /// <summary>The entries the list is currently showing: the curated manifest, or the user's
+    /// folder. Rebuilt when the source changes, never mutated in place.</summary>
+    private List<GalleryEntry> _entries = [];
 
     private GalleryKind _kind = GalleryKind.All;
     private GalleryEntry? _selected;
     private bool _busy;
+
+    private bool LibrarySource => _sourceChoice.SelectedIndex == 1;
 
     public GalleryForm(Engine engine, string device, string displayLabel)
     {
@@ -97,6 +107,7 @@ public sealed class GalleryForm : Form
             Size = new Size(700, 20),
             Location = new Point(20, 48),
         };
+        _subtitle = subtitle;
         var applying = new Label
         {
             Text = $"Applying to: {_displayLabel}",
@@ -115,6 +126,18 @@ public sealed class GalleryForm : Form
             Padding = new Padding(20, 8, 20, 8),
         };
         _toolbar = toolbar;
+        _sourceChoice = new ComboBox
+        {
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Width = 118,
+            Height = 26,
+            FlatStyle = FlatStyle.Flat,
+        };
+        _sourceChoice.Items.AddRange(["Curated", "Your files"]);
+        _sourceChoice.SelectedIndex = 0;
+        Theme.StyleInput(_sourceChoice);
+        _sourceChoice.SelectedIndexChanged += (_, _) => SwitchSource();
+
         var chipRow = new FlowLayoutPanel
         {
             FlowDirection = FlowDirection.LeftToRight,
@@ -145,6 +168,7 @@ public sealed class GalleryForm : Form
         // would make it follow the left edge.
         toolbar.Controls.Add(_search);
         toolbar.Controls.Add(chipRow);
+        toolbar.Controls.Add(_sourceChoice);
         _search.Location = new Point(toolbar.Width - _search.Width, 10);
         _chipRow.Location = new Point(0, 11);
         // A docked panel only learns its real width after it is added to a docking parent, so
@@ -161,15 +185,15 @@ public sealed class GalleryForm : Form
             BackColor = Theme.Colors.Window,
         };
 
-        foreach (var entry in engine.GalleryEntries)
+        _empty = new Label
         {
-            var card = new GalleryCard(entry);
-            card.Downloaded = engine.IsGalleryDownloaded(entry);
-            card.Picked += (_, _) => Select(card.Entry);
-            card.DoubleClick += (_, _) => { Select(card.Entry); Apply(card.Entry); };
-            _cards.Add(card);
-            _list.Controls.Add(card);
-        }
+            AutoSize = false,
+            ForeColor = Theme.Colors.Subtle,
+            Visible = false,
+            TextAlign = ContentAlignment.TopLeft,
+        };
+        _list.Controls.Add(_empty);
+        RebuildCards();
 
         // ---- detail ---------------------------------------------------------------------
         _detail = new Panel
@@ -235,7 +259,10 @@ public sealed class GalleryForm : Form
             ForeColor = Theme.Colors.Subtle,
         };
 
-        _detail.Controls.AddRange([_preview, _title, _meta, _description, _credit, _source, actions, _status]);
+        _chooseFolder = new TrayButton { Text = "Choose a folder…", Width = 150, Height = 34, Visible = false };
+        _chooseFolder.Click += (_, _) => ChooseFolder();
+
+        _detail.Controls.AddRange([_preview, _title, _meta, _description, _credit, _source, actions, _status, _chooseFolder]);
 
         // ---- footer ---------------------------------------------------------------------
         var footer = new FlowLayoutPanel
@@ -278,7 +305,8 @@ public sealed class GalleryForm : Form
     private void LayoutToolbar()
     {
         _search.Location = new Point(Math.Max(0, _toolbar.ClientSize.Width - _search.Width), 10);
-        _chipRow.Location = new Point(0, Math.Max(0, (_toolbar.ClientSize.Height - _chipRow.Height) / 2));
+        _sourceChoice.Location = new Point(0, Math.Max(0, (_toolbar.ClientSize.Height - _sourceChoice.Height) / 2));
+        _chipRow.Location = new Point(_sourceChoice.Right + 10, Math.Max(0, (_toolbar.ClientSize.Height - _chipRow.Height) / 2));
     }
 
     protected override void OnShown(EventArgs e)
@@ -286,7 +314,7 @@ public sealed class GalleryForm : Form
         base.OnShown(e);
         SetKind(GalleryKind.All);
         Reload();
-        Select(_engine.GalleryEntries.FirstOrDefault());
+        Select(_entries.FirstOrDefault());
         _ = WarmThumbnailsAsync();
     }
 
@@ -307,8 +335,8 @@ public sealed class GalleryForm : Form
         }
         if (_search.Editing) return base.ProcessCmdKey(ref msg, keyData);
         // Enter and arrows belong to the buttons when a button has the focus, so Tab-ing to
-        // Close still closes.
-        if (ActiveControl is Button) return base.ProcessCmdKey(ref msg, keyData);
+        // Close still closes; the source combo keeps its own arrow keys.
+        if (ActiveControl is Button or ComboBox) return base.ProcessCmdKey(ref msg, keyData);
 
         var visible = VisibleEntries();
         if (visible.Count == 0) return base.ProcessCmdKey(ref msg, keyData);
@@ -341,7 +369,7 @@ public sealed class GalleryForm : Form
     }
 
     private IReadOnlyList<GalleryEntry> VisibleEntries() =>
-        [.. _engine.GalleryEntries.Where(entry => entry.Matches(_search.Value, _kind))];
+        [.. _entries.Where(entry => entry.Matches(_search.Value, _kind))];
 
     /// <summary>Stacks the matching cards and reports what is on disk. Cards are placed by hand
     /// rather than by a flow layout, which would put two entries side by side in a narrow window
@@ -362,17 +390,88 @@ public sealed class GalleryForm : Form
             if (!visible.Contains(card.Entry)) card.Visible = false;
         _list.AutoScrollMinSize = new Size(width + ListPadding * 2, y + ListPadding);
 
-        int downloaded = _engine.GalleryEntries.Count(_engine.IsGalleryDownloaded);
-        long bytes = 0;
-        foreach (var entry in _engine.GalleryEntries)
+        _empty.Visible = visible.Count == 0;
+        _empty.SetBounds(ListPadding, ListPadding, width, 60);
+        _empty.Text = LibrarySource
+            ? _engine.Config.LibraryFolder is null
+                ? "No folder chosen yet. Use “Choose a folder…” on the right."
+                : "No media files in this folder match the search."
+            : "No wallpapers match the search.";
+
+        if (LibrarySource)
         {
-            if (_engine.Gallery.LocalPathIfDownloaded(entry) is { } path)
-                try { bytes += new FileInfo(path).Length; } catch { /* gone between checks */ }
+            _count.Text = $"{_entries.Count} files · {(_engine.Config.LibraryFolder is { } f ? Path.GetFileName(f) : "no folder")}";
         }
-        _count.Text = $"{_engine.GalleryEntries.Count} wallpapers · {downloaded} on disk · {BytesLabel(bytes)}";
+        else
+        {
+            int downloaded = _entries.Count(_engine.IsGalleryDownloaded);
+            long bytes = 0;
+            foreach (var entry in _entries)
+            {
+                if (_engine.Gallery.LocalPathIfDownloaded(entry) is { } path)
+                    try { bytes += new FileInfo(path).Length; } catch { /* gone between checks */ }
+            }
+            _count.Text = $"{_entries.Count} wallpapers · {downloaded} on disk · {BytesLabel(bytes)}";
+        }
 
         if (_selected is not null && !visible.Contains(_selected)) Select(visible.FirstOrDefault());
         else RefreshDetail();
+    }
+
+    // ---- sources -----------------------------------------------------------------------
+
+    /// <summary>Rebuilds the card set for the current source. Cards own their downscaled stills,
+    /// so the old set is disposed rather than hidden.</summary>
+    private void RebuildCards()
+    {
+        foreach (var card in _cards)
+        {
+            card.Thumbnail = null;
+            _list.Controls.Remove(card);
+            card.Dispose();
+        }
+        _cards.Clear();
+
+        _entries = LibrarySource
+            ? WallpaperLibrary.Entries(_engine.Config.LibraryFolder)
+            : [.. _engine.GalleryEntries];
+
+        foreach (var entry in _entries)
+        {
+            var card = new GalleryCard(entry);
+            card.Downloaded = _engine.IsGalleryDownloaded(entry);
+            card.Picked += (_, _) => Select(card.Entry);
+            card.DoubleClick += (_, _) => { Select(card.Entry); Apply(card.Entry); };
+            _cards.Add(card);
+            _list.Controls.Add(card);
+        }
+    }
+
+    private void SwitchSource()
+    {
+        _subtitle.Text = LibrarySource
+            ? "Your own images and videos. Nothing is copied or uploaded — Set wallpaper points the desktop straight at the file."
+            : "Public-domain and CC0 wallpapers. Nothing is uploaded, and a wallpaper downloads only when you ask for it.";
+        RebuildCards();
+        Reload();
+        Select(_entries.FirstOrDefault());
+        LayoutList();
+        _ = WarmThumbnailsAsync();
+    }
+
+    private void ChooseFolder()
+    {
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = "Choose the folder with your wallpapers",
+            UseDescriptionForTitle = true,
+            ShowNewFolderButton = false,
+            SelectedPath = _engine.Config.LibraryFolder ?? Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
+        };
+        if (dialog.ShowDialog(this) != DialogResult.OK) return;
+        _engine.Config.LibraryFolder = dialog.SelectedPath;
+        _engine.SaveConfig();
+        SwitchSource();
     }
 
     private void ScrollIntoView(GalleryEntry entry)
@@ -412,6 +511,13 @@ public sealed class GalleryForm : Form
             _remove.Visible = false;
             _open.Visible = false;
             _status.Text = "";
+            bool needsFolder = LibrarySource && _engine.Config.LibraryFolder is null;
+            _chooseFolder.Visible = needsFolder;
+            _actions.Visible = !needsFolder;
+            _preview.Placeholder = needsFolder
+                ? "Choose a folder to browse your own wallpapers."
+                : "Nothing selected.";
+            LayoutDetail();
             return;
         }
         RefreshDetail();
@@ -433,33 +539,44 @@ public sealed class GalleryForm : Form
         _meta.Text = $"{entry.KindLabel} · {entry.ResolutionLabel} · {entry.SizeLabel} · {entry.License}";
         _description.Text = entry.Description;
         _description.MaximumSize = new Size(Math.Max(120, _detail.ClientSize.Width - DetailPadding * 2), 0);
-        _credit.Text = entry.CreditLine.Length > 0 ? $"Credit: {entry.CreditLine}" : "";
+        // Your own files have nobody to credit; the curated manifest always does.
+        _credit.Text = !entry.IsLocal && entry.CreditLine.Length > 0 ? $"Credit: {entry.CreditLine}" : "";
         _source.Visible = entry.SourcePage.Length > 0;
 
+        _chooseFolder.Visible = false;
+        _actions.Visible = true;
         _apply.Text = "Set wallpaper";
         _apply.Visible = true;
-        _remove.Visible = downloaded;
+        _remove.Visible = downloaded && !entry.IsLocal;
         _remove.Enabled = downloaded && !_engine.IsGalleryEntryInUse(entry);
         _open.Visible = downloaded;
-        _status.Text = downloaded
-            ? "Ready — press Set wallpaper to put it on the desktop."
-            : $"Not on this PC yet — Set wallpaper downloads the {entry.SizeLabel} first.";
+        _status.Text = entry.IsLocal
+            ? "Your file — Set wallpaper applies it directly, nothing is copied."
+            : downloaded
+                ? "Ready — press Set wallpaper to put it on the desktop."
+                : $"Not on this PC yet — Set wallpaper downloads the {entry.SizeLabel} first.";
         _status.ForeColor = Theme.Colors.Subtle;
 
         if (local is not null)
         {
-            bool playable = WallpaperPreview.IsVideoPath(local) && entry.Height <= 1200;
+            bool isVideo = WallpaperPreview.IsVideoPath(local);
+            bool playable = isVideo && entry.Height <= 1200;
             _preview.Caption = Path.GetFileName(local);
-            if (playable)
+            if (playable || !isVideo)
             {
                 _preview.SetSource(local);
             }
             else
             {
-                // A video that is too large to decode in the panel, or any image: show the still.
+                // A video too large to decode in the panel: show its generated still.
                 string? still = _engine.Gallery.LocalThumbnailIfCached(entry);
                 if (still is not null) _preview.SetSource(still);
-                else _preview.SetSource(null);
+                else
+                {
+                    _preview.SetSource(null);
+                    _preview.Placeholder = "Making a still…";
+                    _ = FetchStillAsync(entry);
+                }
             }
         }
         else
@@ -483,7 +600,7 @@ public sealed class GalleryForm : Form
     {
         try
         {
-            var path = await _engine.Gallery.EnsureThumbnailAsync(entry);
+            var path = await EnsureStillAsync(entry);
             if (path is null || IsDisposed || _selected != entry) return;
             _preview.SetSource(path);
         }
@@ -497,6 +614,11 @@ public sealed class GalleryForm : Form
         }
     }
 
+    private Task<string?> EnsureStillAsync(GalleryEntry entry) =>
+        entry.IsLocal
+            ? WallpaperLibrary.EnsureThumbnailAsync(entry, _engine.Gallery)
+            : _engine.Gallery.EnsureThumbnailAsync(entry);
+
     /// <summary>Positions the preview, then the text under it, then the actions. The preview is
     /// always 16:9 and deliberately capped: at 340 px it pushed the action row past the bottom of
     /// the pane, where the footer clipped it. The pane is only ~550 px tall, so the preview takes
@@ -509,8 +631,8 @@ public sealed class GalleryForm : Form
             - 30                     // title + gap
             - 26                     // meta + gap
             - Math.Max(0, _description.PreferredSize.Height) - 10
-            - Math.Max(0, _credit.PreferredSize.Height) - 8
-            - 22                     // source + gap
+            - (_credit.Visible ? Math.Max(0, _credit.PreferredSize.Height) : 0) - 8
+            - (_source.Visible ? 22 : 0)   // source + gap
             - 40                     // actions
             - 20                     // status + gap
         );
@@ -531,13 +653,17 @@ public sealed class GalleryForm : Form
         y = _source.Bottom + 12;
 
         _actions.Location = new Point(DetailPadding, y);
+        _chooseFolder.Location = new Point(DetailPadding, y);
         y += 38;
         _status.SetBounds(DetailPadding, y, width, 16);
     }
 
     private void Place(Control control, int y, int width)
     {
-        control.SetBounds(DetailPadding, y, width, control.PreferredSize.Height);
+        // A hidden row (no credit, no source link) must not reserve its height, or the pane
+        // grows a blank band between the description and the buttons.
+        int height = control.Visible ? control.PreferredSize.Height : 0;
+        control.SetBounds(DetailPadding, y, width, height);
     }
 
     // ---- actions -----------------------------------------------------------------------
@@ -547,17 +673,17 @@ public sealed class GalleryForm : Form
         if (_busy) return;
         _busy = true;
         _apply.Enabled = false;
-        _status.Text = $"Downloading {entry.Title}…";
+        _status.Text = entry.IsLocal ? $"Applying {entry.Title}…" : $"Downloading {entry.Title}…";
         _status.ForeColor = Theme.Colors.Subtle;
         try
         {
             var progress = new Progress<double>(p => _status.Text = $"Downloading… {p * 100:0}%");
             string path = await _engine.DownloadGalleryEntryAsync(entry, progress);
             _engine.ApplyUserSelection(path, _device);
-            _status.Text = $"Applied to {_displayLabel}";
-            _status.ForeColor = Theme.Colors.Accent;
             foreach (var card in _cards) card.Downloaded = _engine.IsGalleryDownloaded(card.Entry);
             RefreshDetail();
+            _status.Text = $"Applied to {_displayLabel}";
+            _status.ForeColor = Theme.Colors.Accent;
             _ = WarmThumbnailsAsync();
         }
         catch (Exception ex)
@@ -609,8 +735,9 @@ public sealed class GalleryForm : Form
     /// each one painted as it lands rather than after all of them are done.</summary>
     private async Task WarmThumbnailsAsync()
     {
+        var entries = _entries;
         var gate = new SemaphoreSlim(3);
-        var tasks = _engine.GalleryEntries.Select(entry => Task.Run(async () =>
+        var tasks = entries.Select(entry => Task.Run(async () =>
         {
             await gate.WaitAsync();
             try
@@ -620,7 +747,7 @@ public sealed class GalleryForm : Form
                     SetCardThumbnail(entry, cached);
                     return;
                 }
-                var path = await _engine.Gallery.EnsureThumbnailAsync(entry);
+                var path = await EnsureStillAsync(entry);
                 if (path is not null) SetCardThumbnail(entry, path);
             }
             catch (Exception ex)
@@ -640,8 +767,9 @@ public sealed class GalleryForm : Form
         if (bitmap is null) return;
         BeginInvoke(() =>
         {
-            if (IsDisposed) { bitmap.Dispose(); return; }
-            _cards.FirstOrDefault(c => c.Entry == entry)?.Thumbnail = bitmap;
+            var card = IsDisposed ? null : _cards.FirstOrDefault(c => c.Entry == entry);
+            if (card is null) { bitmap.Dispose(); return; }   // source switched while it loaded
+            card.Thumbnail = bitmap;
         });
     }
 

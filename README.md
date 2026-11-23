@@ -47,14 +47,14 @@ unsigned, so SmartScreen will warn: choose More info, then Run anyway.
 <details>
 <summary><b>Or take the ZIP, or build it yourself</b></summary>
 
-**ZIP.** Download `prismos-v0.41.0-win-x64.zip` from the
+**ZIP.** Download `prismos-v0.42.0-win-x64.zip` from the
 [latest release](https://github.com/YUouriii/PrismOS/releases/latest). It unzips to a single
 `prismos.exe`, so there is no installer. The first run adds PrismOS to your Start menu;
 delete that entry and it stays deleted. To uninstall, turn off "Start with Windows", quit the
 app, then delete the folder and the Start menu entry. Check the download if you like:
 
 ```powershell
-Get-FileHash .\prismos-v0.41.0-win-x64.zip -Algorithm SHA256
+Get-FileHash .\prismos-v0.42.0-win-x64.zip -Algorithm SHA256
 # Compare with the .sha256 file next to the download in the release assets.
 ```
 
@@ -162,8 +162,11 @@ desktop, so it can't drift from the real thing.
 display you pick — an image shows itself, a video **plays live and looped inside the panel**, through
 a software (CPU-only) Media Foundation decode that deliberately never touches the GPU, so the
 NVIDIA App overlay stays quiet — and lets you change it from
-there: browse for a file, or open the gallery as a list with each wallpaper's resolution,
-size and licence. A wallpaper can be applied to one display or to all of them, so a second screen
+there: browse for a file, or open the gallery — a list with a still for every wallpaper, its
+resolution, size and licence, a large preview (downloaded videos play in place), search and
+photo/video filters, and a **Set wallpaper** button. A second source, **Your files**, lists a folder
+of your own images and videos with generated thumbnails and the same preview, without copying or
+uploading anything. A wallpaper can be applied to one display or to all of them, so a second screen
 does not have to show the same thing as the first. A Behaviour toggle turns the live preview off
 and shows the captured still instead.
 
@@ -225,8 +228,10 @@ No account, no telemetry. It only goes online when you download something from t
 
 Pexels, Unsplash and Pixabay forbid wallpaper apps in their terms, so the gallery is a static list
 of public domain and CC0 media from NASA and Wikimedia Commons, downloaded straight from the source.
-8 of the 11 entries are checked against a SHA-1 after download; the 3 NASA videos are not yet
-([issue #1](https://github.com/YUouriii/PrismOS/issues/1), a good first contribution).
+11 of the 14 entries are checked against a SHA-1 after download; the 3 NASA videos are not yet
+([issue #1](https://github.com/YUouriii/PrismOS/issues/1), a good first contribution). The **Your
+files** source never uploads anything: it reads a folder you choose and writes only small preview
+stills into the app's own cache.
 
 ## Configuration
 
@@ -242,6 +247,7 @@ The settings panel covers the common cases. Everything lives in
   "fit": "Fill",
   "muteVideo": true,
   "volume": 0.3,
+  "libraryFolder": null,
   "clock": {
     "enabled": true,
     "anchor": "TopCenter",

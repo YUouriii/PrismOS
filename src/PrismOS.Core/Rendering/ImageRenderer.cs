@@ -24,6 +24,7 @@ public sealed class ImageRenderer : IWallpaperRenderer
     private FitRect _rect;
     private bool _animating;
     private bool _disposed;
+    private MemoryStream? _animatedStream;
 
     public ImageRenderer(CompositionHost host, int width, int height, FitMode fit,
         string? staticFramePath = null, Action? onStaticFrame = null)
@@ -40,15 +41,41 @@ public sealed class ImageRenderer : IWallpaperRenderer
 
     public void Load(string path)
     {
-        var image = Image.FromFile(path);
+        // Read the bytes and decode from memory: Image.FromFile keeps the wallpaper file locked
+        // for the life of the image, which blocks replacing it on disk and races the still
+        // capture that writes beside it.
+        var stream = new MemoryStream(File.ReadAllBytes(path));
+        Image image;
+        try
+        {
+            image = Image.FromStream(stream);
+        }
+        catch
+        {
+            stream.Dispose();
+            throw;
+        }
+
         lock (_sync)
         {
+            if (_animated is not null)
+            {
+                if (_animating) ImageAnimator.StopAnimate(_animated, OnFrameChanged);
+                _animated.Dispose();
+                _animated = null;
+                _animating = false;
+            }
+            _animatedStream?.Dispose();
+            _animatedStream = null;
+
+            _canvas?.Dispose();
             _canvas = new Bitmap(_width, _height, PixelFormat.Format32bppPArgb);
             _rect = FitCalculator.Compute(image.Width, image.Height, _width, _height, _fit);
 
             if (ImageAnimator.CanAnimate(image))
             {
                 _animated = image;
+                _animatedStream = stream;   // ImageAnimator reads frames from it for the life of the GIF
                 ImageAnimator.Animate(image, OnFrameChanged);
                 _animating = true;
                 DrawAndPresent(image, highQuality: false);
@@ -56,6 +83,7 @@ public sealed class ImageRenderer : IWallpaperRenderer
                 return;
             }
 
+            stream.Dispose();
             using (image)
             {
                 DrawAndPresent(image, highQuality: true);
@@ -69,10 +97,9 @@ public sealed class ImageRenderer : IWallpaperRenderer
         if (_staticFramePath is null || _canvas is null) return;
         try
         {
-            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(_staticFramePath)!);
             // _canvas is already the monitor-sized composed frame (fit applied) — save directly.
             using var copy = new Bitmap(_canvas);
-            copy.Save(_staticFramePath, ImageFormat.Png);
+            StillWriter.SavePng(copy, _staticFramePath);
             _onStaticFrame?.Invoke();
         }
         catch (Exception ex)
@@ -165,6 +192,8 @@ public sealed class ImageRenderer : IWallpaperRenderer
                 _animated.Dispose();
                 _animated = null;
             }
+            _animatedStream?.Dispose();
+            _animatedStream = null;
             _canvas?.Dispose();
             _canvas = null;
             // The content surface and host belong to the WallpaperWindow.

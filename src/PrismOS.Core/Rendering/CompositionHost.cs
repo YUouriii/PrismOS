@@ -401,8 +401,7 @@ public sealed class CompositionSurface : IComposedOverlay
             {
                 bmp.UnlockBits(bits);
             }
-            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
-            bmp.Save(path, System.Drawing.Imaging.ImageFormat.Png);
+            StillWriter.SavePng(bmp, path);
         }
         finally
         {

@@ -34,6 +34,11 @@ public sealed class GalleryEntry
     /// kilobytes rather than the wallpaper itself. Empty means the file has no still.</summary>
     public string Thumbnail { get; set; } = "";
 
+    /// <summary>True for entries that point at a file already on this PC (the gallery's "Your
+    /// files" source). Nothing is downloaded for them, and nothing may delete them.</summary>
+    [JsonIgnore]
+    public bool IsLocal { get; set; }
+
     /// <summary>"photo" rather than "image": the gallery is showing pictures to people, not media
     /// types to a pipeline.</summary>
     public string KindLabel => Type == "video" ? "video" : "photo";
@@ -121,6 +126,8 @@ public sealed class GalleryService
 
     public string? LocalPathIfDownloaded(GalleryEntry entry)
     {
+        // A local entry is its own download: the file is already where the user keeps it.
+        if (entry.IsLocal) return File.Exists(entry.Url) ? entry.Url : null;
         var path = LocalPath(entry);
         return File.Exists(path) ? path : null;
     }
@@ -206,6 +213,8 @@ public sealed class GalleryService
     /// disk. Returns false when it was not there to begin with.</summary>
     public bool DeleteDownload(GalleryEntry entry)
     {
+        // Never touch a file the user owns: "Remove" only ever means our cached download.
+        if (entry.IsLocal) return false;
         var path = LocalPath(entry);
         if (!File.Exists(path)) return false;
         try
@@ -246,6 +255,11 @@ public sealed class GalleryService
     /// <summary>Downloads (if not cached) and returns the local file path.</summary>
     public async Task<string> EnsureDownloadedAsync(GalleryEntry entry, IProgress<double>? progress = null)
     {
+        if (entry.IsLocal)
+        {
+            return LocalPathIfDownloaded(entry)
+                ?? throw new FileNotFoundException($"The file is no longer there: {entry.Url}");
+        }
         var path = LocalPath(entry);
         if (File.Exists(path)) return path;
 

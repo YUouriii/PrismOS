@@ -97,7 +97,7 @@ public class ConfigTests
         var names = doc.RootElement.EnumerateObject().Select(p => p.Name).ToList();
         Assert.Equal(
             ["wallpapers", "fit", "muteVideo", "volume", "liveVideoPreview", "clock", "info",
-             "pause", "widgets", "startMenuShortcutAdded"],
+             "pause", "widgets", "libraryFolder", "startMenuShortcutAdded"],
             names);
         Assert.False(doc.RootElement.TryGetProperty("behaviour", out _));
         Assert.False(doc.RootElement.TryGetProperty("settings", out _));

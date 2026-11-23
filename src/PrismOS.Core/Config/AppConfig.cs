@@ -30,6 +30,10 @@ public sealed class AppConfig
     public PauseConfig Pause { get; set; } = new();
     public WidgetsConfig Widgets { get; set; } = new();
 
+    /// <summary>The folder the gallery's "Your files" source lists, or null until one is chosen.
+    /// Only the folder is remembered — its contents are re-read every time the gallery opens.</summary>
+    public string? LibraryFolder { get; set; }
+
     /// <summary>Set once a Start menu shortcut exists. From then on it is only repointed, never
     /// recreated, so deleting it from the Start menu sticks. Set back to false to get it again.</summary>
     public bool StartMenuShortcutAdded { get; set; }

@@ -27,7 +27,10 @@ public static class LockScreenWallpaper
             ValidateSource(sourcePath);
 
             Directory.CreateDirectory(Path.GetDirectoryName(destPath)!);
-            using (var img = System.Drawing.Image.FromFile(sourcePath))
+            // Bytes first, then decode: Image.FromFile would hold the source still open while we
+            // convert, and the wallpaper renderer writes that same file on its decode thread.
+            using (var stream = new MemoryStream(File.ReadAllBytes(sourcePath)))
+            using (var img = System.Drawing.Image.FromStream(stream))
                 img.Save(destPath, ImageFormat.Jpeg);
 
             // Per-user: stop Windows Spotlight rotating lock screens over this image.
